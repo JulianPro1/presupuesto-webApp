@@ -1,0 +1,16 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import ReceivableForm from '../../components/ReceivableForm.vue';
+---
+
+<Layout title="Presupuesto — Registrar cuenta por cobrar">
+  <div class="mx-auto flex w-full max-w-xl flex-col gap-4">
+    <a
+      href="/por-cobrar/List"
+      class="inline-flex w-fit items-center gap-1.5 text-xs font-semibold text-slate-500 transition hover:text-slate-800 sm:text-sm"
+    >
+      ← Volver a cuentas por cobrar
+    </a>
+    <ReceivableForm client:only="vue" />
+  </div>
+</Layout>

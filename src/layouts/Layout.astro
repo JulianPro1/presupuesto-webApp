@@ -1,0 +1,209 @@
+---
+import '../styles/global.css';
+import { ClientRouter } from 'astro:transitions';
+import RateBadges from '../components/RateBadges.vue';
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const {
+  title = 'Presupuesto — Control USDT/BCV',
+  description = 'Control de presupuesto mensual en dualidad USDT / tasa oficial BCV',
+} = Astro.props;
+
+const path = Astro.url.pathname;
+
+const pageAnim = {
+  old: {
+    name: 'vt-out',
+    duration: '100ms',
+    easing: 'ease-in',
+    fillMode: 'both',
+  },
+  new: {
+    name: 'vt-in',
+    duration: '160ms',
+    easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    fillMode: 'both',
+  },
+};
+
+const contentTransition = {
+  forwards: pageAnim,
+  backwards: pageAnim,
+};
+
+const icons: Record<string, string> = {
+  'chart-column':
+    '<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>',
+  'trending-up':
+    '<path d="M16 7h6v6"/><path d="m22 7-8.5 8.5-5-5L2 17"/>',
+  'trending-down':
+    '<path d="M16 17h6v-6"/><path d="m22 17-8.5-8.5-5 5L2 7"/>',
+  'calendar-clock':
+    '<path d="M16 14v2.2l1.6 1"/><path d="M16 2v4"/><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"/><path d="M3 10h5"/><path d="M8 2v4"/>',
+  'hand-coins':
+    '<path d="M11 15h2a2 2 0 1 0 0-4h-3c-.6 0-1.1.2-1.4.6L3 17"/><path d="m7 21 1.6-1.4c.3-.4.8-.6 1.4-.6h4c1.1 0 2.1-.4 2.8-1.2l4.6-4.4a2 2 0 0 0-2.75-2.91l-4.2 3.9"/><path d="m2 16 6 6"/><circle cx="16" cy="9" r="2.9"/><circle cx="6" cy="5" r="3"/>',
+  'piggy-bank':
+    '<path d="M11 17h3v2a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-3a3.16 3.16 0 0 0 2-2h1a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1h-1a5 5 0 0 0-2-4V3a4 4 0 0 0-3.2 1.6l-.3.4H11a6 6 0 0 0-6 6v1a5 5 0 0 0 2 4v3a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1z"/><path d="M16 10h.01"/><path d="M2 8v1a2 2 0 0 0 2 2h1"/>',
+  calculator:
+    '<rect width="16" height="20" x="4" y="2" rx="2"/><line x1="8" x2="16" y1="6" y2="6"/><line x1="16" x2="16" y1="14" y2="18"/><path d="M16 10h.01"/><path d="M12 10h.01"/><path d="M8 10h.01"/><path d="M12 14h.01"/><path d="M8 14h.01"/><path d="M12 18h.01"/><path d="M8 18h.01"/>',
+};
+
+const navLinks = [
+  { href: '/', label: 'Analíticas', short: 'Inicio', icon: 'chart-column', color: 'text-sky-600', match: (p: string) => p === '/' },
+  { href: '/ingresos/List', label: 'Ingresos', short: 'Ingresos', icon: 'trending-up', color: 'text-emerald-600', match: (p: string) => p.startsWith('/ingresos') },
+  { href: '/gastos/List', label: 'Gastos', short: 'Gastos', icon: 'trending-down', color: 'text-rose-600', match: (p: string) => p.startsWith('/gastos') },
+  { href: '/por-pagar/List', label: 'C. Por pagar', short: 'Pagar', icon: 'calendar-clock', color: 'text-amber-600', match: (p: string) => p.startsWith('/por-pagar') },
+  { href: '/por-cobrar/List', label: 'C. Por cobrar', short: 'Cobrar', icon: 'hand-coins', color: 'text-violet-600', match: (p: string) => p.startsWith('/por-cobrar') },
+  { href: '/saldo-a-favor', label: 'Saldo a favor', short: 'Saldo', icon: 'piggy-bank', color: 'text-teal-600', match: (p: string) => p.startsWith('/saldo-a-favor') },
+  { href: '/calculadora', label: 'Calculadora', short: 'Calc.', icon: 'calculator', color: 'text-slate-600', match: (p: string) => p.startsWith('/calculadora') },
+];
+---
+
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <meta name="generator" content={Astro.generator} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <title>{title}</title>
+    <ClientRouter />
+  </head>
+  <body class="min-h-screen bg-slate-100 font-sans text-slate-900 antialiased">
+    <header class="sticky top-0 z-40 border-b border-slate-200 bg-white/80 backdrop-blur">
+      <div
+        class="mx-auto flex w-full max-w-6xl items-center gap-2 px-3 py-2.5 sm:px-6"
+      >
+        <div
+          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-600 text-white"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="h-4.5 w-4.5"
+            aria-hidden="true"
+          >
+            <path
+              d="M21 12V7H5a2 2 0 0 1 0-4h14v4"
+            ></path>
+            <path d="M3 5v14a2 2 0 0 0 2 2h16v-5"></path>
+            <path d="M18 12a2 2 0 0 0 0 4h4v-4Z"></path>
+          </svg>
+        </div>
+        <span
+          class="shrink-0 text-sm font-extrabold tracking-tight text-slate-900"
+        >
+          Presupuesto
+        </span>
+
+        <nav
+          class="ml-5 hidden min-w-0 items-center gap-0.5 overflow-x-auto rounded-full border border-slate-200/70 bg-slate-100/80 p-1 md:flex [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          aria-label="Módulos del presupuesto"
+        >
+          {
+            navLinks.map((link) => (
+              <a
+                href={link.href}
+                aria-current={link.match(path) ? 'page' : undefined}
+                class:list={[
+                  'group inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap transition-all duration-200 ease-out sm:text-xs',
+                  link.match(path)
+                    ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/80'
+                    : 'text-slate-500 hover:bg-white/70 hover:text-slate-800 hover:shadow-sm',
+                ]}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  class:list={[
+                    'h-3.5 w-3.5 shrink-0 transition-colors duration-200',
+                    link.match(path)
+                      ? link.color
+                      : 'text-slate-400 group-hover:text-slate-600',
+                  ]}
+                  aria-hidden="true"
+                  set:html={icons[link.icon]}
+                />
+                {link.label}
+              </a>
+            ))
+          }
+        </nav>
+
+        <RateBadges client:only="vue" class="ml-auto md:hidden" />
+      </div>
+    </header>
+
+    <main
+      class="mx-auto w-full max-w-6xl px-4 pt-6 pb-24 sm:px-6 md:pb-6"
+      transition:animate={contentTransition}
+    >
+      <slot />
+    </main>
+
+    <nav
+      class="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/90 backdrop-blur md:hidden"
+      aria-label="Módulos del presupuesto"
+    >
+      <div
+        class="flex items-stretch justify-around px-1 pt-1 pb-[max(env(safe-area-inset-bottom),0.25rem)]"
+      >
+        {
+          navLinks.map((link) => (
+            <a
+              href={link.href}
+              aria-current={link.match(path) ? 'page' : undefined}
+              class:list={[
+                'flex flex-1 flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-[10px] font-semibold transition-colors duration-200',
+                link.match(path)
+                  ? link.color
+                  : 'text-slate-400 hover:text-slate-600',
+              ]}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="h-5 w-5 shrink-0"
+                aria-hidden="true"
+                set:html={icons[link.icon]}
+              />
+              <span class="truncate">{link.short}</span>
+            </a>
+          ))
+        }
+      </div>
+    </nav>
+
+    <footer class="pb-20 text-center text-xs text-slate-400 md:pb-8">
+      Los datos se guardan localmente en tu navegador · Exporta a Excel para
+      respaldar
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,8 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import ExpensesTable from '../../components/ExpensesTable.vue';
+---
+
+<Layout title="Presupuesto — Gastos">
+  <ExpensesTable client:only="vue" />
+</Layout>
