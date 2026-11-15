@@ -6,17 +6,17 @@ import {
 } from '../stores/budgetStore';
 
 /**
- * DolarVZLA:
- *  - BCV: JSON estático servido por CDN (sin auth, CORS abierto).
- *  - USDT: stream público por WebSocket que emite { currency, buy, sell, date }
- *    con las mejores puntas del libro de órdenes de Binance P2P (sin auth).
- *    El REST /public/usdt/exchange-rate requiere una API key que solo puede
- *    generarse desde el propio dominio de DolarVZLA, así que se usa el WS.
+ * Fuentes de tasas con fallback:
+ *  - BCV: DolarVZLA CDN → DolarApi "oficial".
+ *  - USDT: DolarVZLA REST (requiere key) → DolarApi "paralelo" como proxy
+ *    del mercado P2P. El stream WS de DolarVZLA se mantiene por si revive.
+ *  - DolarApi (ve.dolarapi.com): gratis, sin auth, CORS abierto.
  */
 
 const BCV_URL = 'https://rates.dolarvzla.com/bcv/current.json';
 const USDT_REST_URL = 'https://api.dolarvzla.com/public/usdt/exchange-rate';
 const USDT_WS_URL = 'wss://api.dolarvzla.com/public/ws/usdt-ves';
+const DOLARAPI_BASE = 'https://ve.dolarapi.com/v1/dolares';
 
 const ENV_API_KEY = import.meta.env.PUBLIC_DOLARVZLA_API_KEY ?? '';
 
@@ -37,56 +37,96 @@ interface UsdtExchangeRateResponse {
   };
 }
 
-/** Obtiene la tasa oficial BCV (USD/VES) desde el CDN de DolarVZLA. */
-export async function syncBcvRate(): Promise<number> {
-  const res = await fetch(BCV_URL, {
+interface DolarApiRate {
+  promedio?: number;
+  fechaActualizacion?: string;
+}
+
+/** Consulta una fuente de DolarApi ('oficial' | 'paralelo'). */
+async function fetchDolarApi(
+  source: 'oficial' | 'paralelo',
+): Promise<{ rate: number; date: string }> {
+  const res = await fetch(`${DOLARAPI_BASE}/${source}`, {
     headers: { Accept: 'application/json' },
     cache: 'no-cache',
   });
-  if (!res.ok) throw new Error(`DolarVZLA CDN respondió HTTP ${res.status}`);
+  if (!res.ok) throw new Error(`DolarApi respondió HTTP ${res.status}`);
 
-  const data = (await res.json()) as BcvCurrentResponse;
-  const usd = data.current?.usd;
-  if (typeof usd !== 'number' || !(usd > 0)) {
-    throw new Error('Respuesta BCV inválida');
+  const data = (await res.json()) as DolarApiRate;
+  if (typeof data.promedio !== 'number' || !(data.promedio > 0)) {
+    throw new Error('Respuesta DolarApi inválida');
   }
+  return { rate: data.promedio, date: data.fechaActualizacion ?? '' };
+}
 
-  setRates({ bcv: usd });
-  setRatesMeta({ bcvDate: data.current?.date ?? '' });
-  return usd;
+/** Obtiene la tasa oficial BCV: DolarVZLA CDN → DolarApi "oficial". */
+export async function syncBcvRate(): Promise<number> {
+  try {
+    const res = await fetch(BCV_URL, {
+      headers: { Accept: 'application/json' },
+      cache: 'no-cache',
+    });
+    if (!res.ok)
+      throw new Error(`DolarVZLA CDN respondió HTTP ${res.status}`);
+
+    const data = (await res.json()) as BcvCurrentResponse;
+    const usd = data.current?.usd;
+    if (typeof usd !== 'number' || !(usd > 0)) {
+      throw new Error('Respuesta BCV inválida');
+    }
+
+    setRates({ bcv: usd });
+    setRatesMeta({ bcvDate: data.current?.date ?? '' });
+    return usd;
+  } catch {
+    const { rate, date } = await fetchDolarApi('oficial');
+    setRates({ bcv: rate });
+    setRatesMeta({ bcvDate: date });
+    return rate;
+  }
 }
 
 /**
- * Tasa USDT por REST (promedio compra/venta de Binance P2P).
- * Requiere PUBLIC_DOLARVZLA_API_KEY; sin key es no-op y devuelve false.
+ * Tasa USDT: DolarVZLA REST (si hay key) → DolarApi "paralelo" como
+ * fallback (su promedio se calcula del mismo mercado P2P).
  */
 export async function syncUsdtRate(): Promise<boolean> {
   const apiKey = $dolarVzlaApiKey.get() || ENV_API_KEY;
-  if (!apiKey) return false;
 
-  const res = await fetch(USDT_REST_URL, {
-    headers: {
-      Accept: 'application/json',
-      'x-dolarvzla-key': apiKey,
-    },
-    cache: 'no-cache',
-  });
-  if (!res.ok) {
-    throw new Error(
-      res.status === 401
-        ? 'API key de DolarVZLA inválida o expirada'
-        : `DolarVZLA API respondió HTTP ${res.status}`,
-    );
+  if (apiKey) {
+    try {
+      const res = await fetch(USDT_REST_URL, {
+        headers: {
+          Accept: 'application/json',
+          'x-dolarvzla-key': apiKey,
+        },
+        cache: 'no-cache',
+      });
+      if (!res.ok) {
+        throw new Error(
+          res.status === 401
+            ? 'API key de DolarVZLA inválida o expirada'
+            : `DolarVZLA API respondió HTTP ${res.status}`,
+        );
+      }
+
+      const data = (await res.json()) as UsdtExchangeRateResponse;
+      const average = data.current?.average;
+      if (typeof average !== 'number' || !(average > 0)) {
+        throw new Error('Respuesta USDT inválida');
+      }
+
+      setRates({ usdt: average });
+      setRatesMeta({ usdtDate: data.current?.date ?? '' });
+      return true;
+    } catch {
+      // cae al fallback de DolarApi
+    }
   }
 
-  const data = (await res.json()) as UsdtExchangeRateResponse;
-  const average = data.current?.average;
-  if (typeof average !== 'number' || !(average > 0)) {
-    throw new Error('Respuesta USDT inválida');
-  }
-
-  setRates({ usdt: average });
-  setRatesMeta({ usdtDate: data.current?.date ?? '' });
+  const { rate, date } = await fetchDolarApi('paralelo');
+  setRates({ usdt: rate });
+  setRatesMeta({ usdtDate: date });
   return true;
 }
 
@@ -171,7 +211,7 @@ export function startUsdtStream(): () => void {
 }
 
 /**
- * Sincroniza ambas tasas: BCV por CDN y USDT por REST si hay API key.
+ * Sincroniza ambas tasas con cadena de fallback DolarVZLA → DolarApi.
  * Devuelve qué fuentes respondieron bien.
  */
 export async function syncRates(): Promise<{ bcv: boolean; usdt: boolean }> {
