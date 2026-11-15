@@ -654,13 +654,19 @@ function parseDataSheet(
 }
 
 /**
- * Lee un workbook Excel y valida todas las hojas reconocidas
- * ("Ingresos", "Gastos", "Por pagar"). Si el archivo no tiene hojas
+ * Lee un workbook Excel y valida las hojas reconocidas ("Ingresos",
+ * "Gastos", "Por pagar", "Por cobrar"). Si el archivo no tiene hojas
  * reconocibles, se intenta importar la primera hoja como gastos
  * (compatibilidad con archivos exportados por versiones anteriores).
+ *
+ * Si se indica `onlyKind`, la validación queda acotada a ese módulo
+ * (importación específica): se ignoran las hojas de otros tipos y, si
+ * ninguna hoja coincide por nombre con el módulo buscado, se asume que
+ * la primera hoja del archivo corresponde a ese módulo.
  */
 export async function parseAndValidateWorkbook(
   file: File,
+  onlyKind?: SheetKind,
 ): Promise<WorkbookValidationResult> {
   const result: WorkbookValidationResult = {
     isValid: false,
@@ -693,14 +699,23 @@ export async function parseAndValidateWorkbook(
     return result;
   }
 
-  // Clasificar hojas reconocidas; si ninguna aplica, usar la primera como gastos
-  const targets = wb.SheetNames.map((name) => ({
+  // Clasificar hojas reconocidas por nombre.
+  let targets = wb.SheetNames.map((name) => ({
     name,
     kind: classifySheet(name),
   })).filter((t): t is { name: string; kind: SheetKind } => t.kind !== null);
 
-  if (targets.length === 0) {
-    targets.push({ name: wb.SheetNames[0], kind: 'expenses' });
+  if (onlyKind) {
+    // Importación específica: solo procesar hojas de ese módulo. Si ninguna
+    // coincide por nombre, se asume que la primera hoja es la buscada
+    // (compatibilidad con archivos de una sola hoja sin el nombre exacto).
+    const matching = targets.filter((t) => t.kind === onlyKind);
+    targets =
+      matching.length > 0
+        ? matching
+        : [{ name: wb.SheetNames[0], kind: onlyKind }];
+  } else if (targets.length === 0) {
+    targets = [{ name: wb.SheetNames[0], kind: 'expenses' }];
   }
 
   for (const { name, kind } of targets) {
@@ -957,4 +972,116 @@ export function downloadBudgetTemplate(): void {
   XLSX.utils.book_append_sheet(wb, wsInstructions, 'Instrucciones');
 
   XLSX.writeFile(wb, 'plantilla_presupuesto.xlsx');
+}
+
+const MODULE_LABELS: Record<SheetKind, string> = {
+  incomes: 'Ingresos',
+  expenses: 'Gastos',
+  payables: 'Por pagar',
+  receivables: 'Por cobrar',
+};
+
+const MODULE_SLUGS: Record<SheetKind, string> = {
+  incomes: 'ingresos',
+  expenses: 'gastos',
+  payables: 'por-pagar',
+  receivables: 'por-cobrar',
+};
+
+const MODULE_EXAMPLE_ROWS: Record<SheetKind, (string | number)[][]> = {
+  incomes: [
+    ['2026-10-01', 'Sueldo mensual', 'Sueldo', 450, 'USDT', '', ''],
+    ['2026-10-05', 'Proyecto freelance diseño web', 'Freelance', 120, 'USDT', '', ''],
+    ['2026-10-08', 'Venta de artículos usados', 'Ventas', 3500, 'Bs.', '', ''],
+  ],
+  expenses: [
+    ['2026-10-01', 'Compras del supermercado', 'Alimentación', 45.5, 'USDT', '', ''],
+    ['2026-10-02', 'Pago de servicio eléctrico e internet', 'Servicios', 1250.0, 'Bs.', '', ''],
+    ['2026-10-03', 'Consultas médicas y farmacia', 'Salud', 25.0, 'USDT', '', ''],
+  ],
+  payables: [
+    ['2026-10-05', 'Alquiler del mes', 'Vivienda', 300, 'USDT', '2026-10-10', '', ''],
+    ['2026-10-06', 'Mensualidad del gimnasio', 'Salud', 20, 'USDT', '2026-10-15', '', ''],
+  ],
+  receivables: [
+    ['2026-10-05', 'Pago pendiente proyecto freelance', 'Freelance', 80, 'USDT', '2026-10-20', '', ''],
+    ['2026-10-07', 'Venta por cobrar equipo usado', 'Ventas', 60, 'USDT', '2026-10-25', '', ''],
+  ],
+};
+
+/**
+ * Genera y descarga una plantilla Excel de un solo módulo (una hoja de
+ * datos + una hoja de instrucciones acotada a sus columnas), para
+ * importaciones específicas desde "Más opciones".
+ */
+export function downloadModuleTemplate(kind: SheetKind): void {
+  const wb = XLSX.utils.book_new();
+  const isIncomeLike = kind === 'incomes' || kind === 'receivables';
+  const hasDueDate = kind === 'payables' || kind === 'receivables';
+  const groupHeader = isIncomeLike ? 'Fuente' : 'Categoría';
+  const sheetName = MODULE_LABELS[kind];
+  const groupOptions = isIncomeLike ? INCOME_SOURCES : CATEGORIES;
+
+  const headers = ['Fecha', 'Descripción', groupHeader, 'Monto', 'Moneda'];
+  if (hasDueDate) headers.push('Vencimiento');
+  headers.push('Tasa BCV', 'Tasa USDT');
+
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...MODULE_EXAMPLE_ROWS[kind]]);
+  ws['!cols'] = headers.map((h) => ({
+    wch: h === 'Descripción' ? 38 : h === groupHeader ? 18 : 14,
+  }));
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+  const instructions: (string | number)[][] = [
+    [`GUÍA DE LLENADO — ${sheetName.toUpperCase()}`],
+    [],
+    [
+      `Esta plantilla contiene solo la hoja "${sheetName}". Impórtala desde`,
+      `"Más opciones → Importar ${sheetName}".`,
+    ],
+    [],
+    ['Columna', 'Obligatorio', 'Formato aceptado', 'Notas y Opciones permitidas'],
+    ['Fecha', 'SÍ', 'YYYY-MM-DD o DD/MM/YYYY', 'Ejemplo: 2026-10-01 o 01/10/2026.'],
+    ['Descripción', 'SÍ', 'Texto libre', 'Detalle explicativo del movimiento.'],
+    [
+      groupHeader,
+      'SÍ',
+      `${groupHeader} exacta`,
+      `Opciones válidas: ${groupOptions.join(', ')}.`,
+    ],
+    ['Monto', 'SÍ', 'Número positivo', 'Monto mayor a 0 (ej. 45.50 o 1200).'],
+    [
+      'Moneda',
+      'SÍ',
+      'USDT o Bs.',
+      'Escribe "USDT" para dólares/USDT o "Bs." para bolívares.',
+    ],
+    ...(hasDueDate
+      ? [
+          [
+            'Vencimiento',
+            'NO (Opcional)',
+            'YYYY-MM-DD o DD/MM/YYYY',
+            'Fecha límite de pago o cobro de la cuenta.',
+          ],
+        ]
+      : []),
+    [
+      'Tasa BCV',
+      'NO (Opcional)',
+      'Número',
+      'Si se deja vacío, la app aplicará automáticamente la tasa BCV actual.',
+    ],
+    [
+      'Tasa USDT',
+      'NO (Opcional)',
+      'Número',
+      'Si se deja vacío, la app aplicará automáticamente la tasa USDT actual.',
+    ],
+  ];
+  const wsInstructions = XLSX.utils.aoa_to_sheet(instructions);
+  wsInstructions['!cols'] = [{ wch: 28 }, { wch: 14 }, { wch: 25 }, { wch: 60 }];
+  XLSX.utils.book_append_sheet(wb, wsInstructions, 'Instrucciones');
+
+  XLSX.writeFile(wb, `plantilla-presupuesto-${MODULE_SLUGS[kind]}.xlsx`);
 }

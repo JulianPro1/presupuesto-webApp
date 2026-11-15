@@ -20,6 +20,8 @@ import BaseInput from '@/components/BaseInput.vue';
 import MultiselectCustom from '@/components/MultiselectCustom.vue';
 import CustomTable from '@/components/table/CustomTable.vue';
 import ImportExportActions from '@/components/ImportExportActions.vue';
+import FilterRow from '@/components/common/filters/FilterRow.vue';
+import FilterItem from '@/components/common/filters/FilterItem.vue';
 import type { TableHeader } from '@/const/tableConst';
 
 const { formatDateFriendly } = useDateFormat();
@@ -33,6 +35,11 @@ const query = ref('');
 const sourceFilter = ref<'Todas' | IncomeSource>('Todas');
 
 const sourceOptions = ['Todas', ...INCOME_SOURCES] as const;
+
+function resetFilters() {
+  query.value = '';
+  sourceFilter.value = 'Todas';
+}
 
 const filtered = computed(() =>
   receivables.value.filter(
@@ -157,22 +164,19 @@ async function handleActionClick(payload: {
 
 <template>
   <section class="min-w-0 rounded-2xl border border-slate-200 bg-white shadow-sm">
-    <div
-      class="flex items-end justify-between gap-3 border-b border-slate-200 p-4 sm:p-5"
-    >
-      <div
-        class="flex min-w-0 flex-1 items-end justify-start gap-2"
-      >
-        <BaseInput
-          id="receivable-search"
-          v-model="query"
-          placeholder="Buscar…"
-          autocomplete="off"
-          label="Buscar"
-          class="w-full min-w-0 flex-1 lg:w-44 lg:flex-none xl:w-48 [&_input]:h-10 [&_input]:rounded-lg! [&_input]:bg-slate-50! [&_input]:py-2! [&_input]:pr-3! [&_input]:text-xs! sm:[&_input]:text-sm!"
-        />
+    <FilterRow :action-method="resetFilters">
+      <template #filters>
+        <FilterItem label="Buscar" primary cols="col-span-12 md:col-span-5 lg:col-span-4">
+          <BaseInput
+            id="receivable-search"
+            v-model="query"
+            placeholder="Buscar…"
+            autocomplete="off"
+            class="[&_input]:h-10 [&_input]:rounded-lg! [&_input]:bg-slate-50! [&_input]:py-2! [&_input]:pr-3! [&_input]:text-xs! sm:[&_input]:text-sm!"
+          />
+        </FilterItem>
 
-        <div class="min-w-0 flex-1 lg:w-44 lg:flex-none xl:w-48 [&_label]:truncate [&_label]:font-semibold [&_label]:whitespace-nowrap">
+        <FilterItem label="Fuente" cols="col-span-12 md:col-span-5 lg:col-span-4">
           <MultiselectCustom
             v-model="sourceFilter"
             :options="[...sourceOptions]"
@@ -181,13 +185,15 @@ async function handleActionClick(payload: {
             :show-descriptions="false"
             :allow-empty="false"
             aria-label="Filtrar por fuente"
-            label="Fuente"
-            class="w-full"
           />
-        </div>
+        </FilterItem>
+      </template>
 
+      <template #actions>
         <ImportExportActions />
+      </template>
 
+      <template #cta>
         <a
           href="/por-cobrar/New"
           aria-label="Registrar cuenta por cobrar"
@@ -196,8 +202,8 @@ async function handleActionClick(payload: {
           <CirclePlus class="h-4 w-4 shrink-0" aria-hidden="true" />
           <span class="hidden lg:inline">Registrar por cobrar</span>
         </a>
-      </div>
-    </div>
+      </template>
+    </FilterRow>
 
     <p
       v-if="filtered.length > 0"

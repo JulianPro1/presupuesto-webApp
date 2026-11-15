@@ -13,7 +13,9 @@ import {
 import Modal from '@/components/common/layout/Modal.vue';
 import {
   downloadBudgetTemplate,
+  downloadModuleTemplate,
   parseAndValidateWorkbook,
+  type SheetKind,
   type WorkbookValidationResult,
 } from '@/utils/excelImport';
 import {
@@ -26,9 +28,11 @@ import { useSwalToast } from '@/composables/ui/useSwalToast';
 
 interface Props {
   open: boolean;
+  /** 'all' importa las 4 hojas; un SheetKind acota la importación a un solo módulo. */
+  scope?: 'all' | SheetKind;
 }
 
-defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), { scope: 'all' });
 
 const emit = defineEmits<{
   (e: 'close'): void;
@@ -36,6 +40,21 @@ const emit = defineEmits<{
 }>();
 
 const { showSuccess, showError } = useSwalToast();
+
+const MODULE_LABELS: Record<SheetKind, string> = {
+  incomes: 'Ingresos',
+  expenses: 'Gastos',
+  payables: 'Por pagar',
+  receivables: 'Por cobrar',
+};
+
+const isScoped = computed(() => props.scope !== 'all');
+const scopedKind = computed(() =>
+  isScoped.value ? (props.scope as SheetKind) : null,
+);
+const scopeLabel = computed(() =>
+  scopedKind.value ? MODULE_LABELS[scopedKind.value] : 'presupuesto',
+);
 
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const isDragging = ref(false);
@@ -77,8 +96,13 @@ const previewExtra = computed(() => totalItems.value - previewItems.value.length
 
 function handleDownloadTemplate() {
   try {
-    downloadBudgetTemplate();
-    showSuccess('Descargando plantilla de presupuesto Excel');
+    if (scopedKind.value) {
+      downloadModuleTemplate(scopedKind.value);
+      showSuccess(`Descargando plantilla de ${scopeLabel.value}`);
+    } else {
+      downloadBudgetTemplate();
+      showSuccess('Descargando plantilla de presupuesto Excel');
+    }
   } catch (err) {
     showError('Error al generar la plantilla');
   }
@@ -101,7 +125,7 @@ async function processFile(file: File) {
   selectedFileSize.value = formatBytes(file.size);
 
   try {
-    const result = await parseAndValidateWorkbook(file);
+    const result = await parseAndValidateWorkbook(file, scopedKind.value ?? undefined);
     validationResult.value = result;
   } catch (err: any) {
     showError(err?.message || 'Error al procesar el archivo Excel');
@@ -142,14 +166,18 @@ function handleConfirmImport() {
     return;
   }
 
-  importIncomes(r.incomes, importMode.value);
-  importExpenses(r.expenses, importMode.value);
-  importPayables(r.payables, importMode.value);
-  importReceivables(r.receivables, importMode.value);
+  // Importante: en modo "reemplazar" solo se deben vaciar los módulos
+  // dentro del alcance (scope) de esta importación. Si es específica
+  // (p. ej. solo Gastos), nunca debe afectar los demás listados.
+  const kind = scopedKind.value;
+  if (!kind || kind === 'incomes') importIncomes(r.incomes, importMode.value);
+  if (!kind || kind === 'expenses') importExpenses(r.expenses, importMode.value);
+  if (!kind || kind === 'payables') importPayables(r.payables, importMode.value);
+  if (!kind || kind === 'receivables') importReceivables(r.receivables, importMode.value);
 
   showSuccess(
     importMode.value === 'replace'
-      ? `Se reemplazó el presupuesto con ${totalItems.value} registro(s)`
+      ? `Se reemplazaron los registros de ${scopeLabel.value} con ${totalItems.value} registro(s)`
       : `Se agregaron ${totalItems.value} registro(s) exitosamente`,
   );
 
@@ -171,8 +199,16 @@ function handleClose() {
           <FileSpreadsheet class="h-5 w-5" aria-hidden="true" />
         </div>
         <div>
-          <h3 class="text-base font-bold text-slate-900 leading-tight">Importar presupuesto desde Excel</h3>
-          <p class="text-xs text-slate-500">Ingresos, gastos y cuentas por pagar en un solo archivo</p>
+          <h3 class="text-base font-bold text-slate-900 leading-tight">
+            {{ isScoped ? `Importar ${scopeLabel}` : 'Importar presupuesto desde Excel' }}
+          </h3>
+          <p class="text-xs text-slate-500">
+            {{
+              isScoped
+                ? `Solo se importarán registros de ${scopeLabel.toLowerCase()}`
+                : 'Ingresos, gastos, por pagar y por cobrar en un solo archivo'
+            }}
+          </p>
         </div>
       </div>
     </template>
@@ -185,7 +221,11 @@ function handleClose() {
           <div class="text-xs leading-relaxed text-slate-700">
             <span class="font-bold text-sky-950">¿Aún no tienes el formato?</span>
             <p class="text-slate-600">
-              Descarga la plantilla con las tres hojas (Ingresos, Gastos y Por pagar), ejemplos y opciones permitidas.
+              {{
+                isScoped
+                  ? `Descarga la plantilla de ${scopeLabel.toLowerCase()} con ejemplos y opciones permitidas.`
+                  : 'Descarga la plantilla con las cuatro hojas (Ingresos, Gastos, Por pagar y Por cobrar), ejemplos y opciones permitidas.'
+              }}
             </p>
           </div>
         </div>
@@ -333,7 +373,10 @@ function handleClose() {
             <h4 class="text-sm font-bold text-emerald-950">
               ¡Archivo validado correctamente!
             </h4>
-            <p class="text-xs text-emerald-800">
+            <p v-if="isScoped" class="text-xs text-emerald-800">
+              Se verificaron {{ totalItems }} registro(s) de {{ scopeLabel.toLowerCase() }} sin errores.
+            </p>
+            <p v-else class="text-xs text-emerald-800">
               Se verificaron {{ totalItems }} registro(s) sin errores:
               {{ validationResult.incomes.length }} ingreso(s),
               {{ validationResult.expenses.length }} gasto(s),
@@ -384,8 +427,16 @@ function handleClose() {
                 class="mt-1 text-rose-600 focus:ring-rose-500"
               />
               <div>
-                <span class="block text-xs font-bold text-rose-900">Reemplazar todos los datos</span>
-                <span class="block text-[11px] text-slate-500">Borra ingresos, gastos, por pagar y por cobrar actuales; carga solo los del archivo.</span>
+                <span class="block text-xs font-bold text-rose-900">
+                  {{ isScoped ? `Reemplazar ${scopeLabel.toLowerCase()}` : 'Reemplazar todos los datos' }}
+                </span>
+                <span class="block text-[11px] text-slate-500">
+                  {{
+                    isScoped
+                      ? `Borra solo los registros actuales de ${scopeLabel.toLowerCase()}; los demás módulos no se modifican.`
+                      : 'Borra ingresos, gastos, por pagar y por cobrar actuales; carga solo los del archivo.'
+                  }}
+                </span>
               </div>
             </label>
           </div>

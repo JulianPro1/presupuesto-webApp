@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useStore } from '@nanostores/vue';
 import {
   Wallet,
@@ -16,14 +16,14 @@ import {
   $stats,
   $totalIncome,
 } from '../stores/budgetStore';
-import { syncRates, startUsdtStream } from '../utils/ratesApi';
+import { syncRates } from '../utils/ratesApi';
 import { formatUsd, formatVes, formatPct } from '../utils/formatters';
 import { useDateFormat } from '@/composables/ui/useDateFormat';
 import { useSwalToast } from '@/composables/ui/useSwalToast';
 import RatesModal from '@/components/RatesModal.vue';
 
 const { formatDateFriendly } = useDateFormat();
-const { showSuccess, showInfo, showError } = useSwalToast();
+const { showSuccess, showError } = useSwalToast();
 
 const income = useStore($totalIncome);
 const stats = useStore($stats);
@@ -35,29 +35,19 @@ const spread = useStore($spreadPct);
 const showRatesModal = ref(false);
 
 const loading = computed(() => status.value === 'loading');
-const usdtLive = computed(() => status.value === 'live');
-
-let stopUsdt: (() => void) | null = null;
 
 async function refresh(notify = false) {
   const ok = await syncRates();
   if (!notify) return;
   if (ok.bcv && ok.usdt) {
-    showSuccess('Tasas BCV y USDT actualizadas desde DolarVZLA');
-  } else if (ok.bcv) {
-    showInfo('Tasa BCV actualizada (USDT sigue por stream en vivo)');
+    showSuccess('Tasas BCV y USDT actualizadas');
   } else {
-    showError('No se pudo contactar a DolarVZLA');
+    showError('No se pudo contactar la fuente de tasas');
   }
 }
 
 onMounted(() => {
   void refresh();
-  stopUsdt = startUsdtStream();
-});
-
-onBeforeUnmount(() => {
-  stopUsdt?.();
 });
 </script>
 
@@ -69,7 +59,13 @@ onBeforeUnmount(() => {
       class="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-4"
     >
       <p class="text-xs text-slate-200">
-        Fuente: DolarVZLA
+        Fuente:
+        <a
+          href="https://www.usdt.com.ve"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="underline decoration-dotted underline-offset-2 hover:text-white"
+        >usdt.com.ve</a>
       </p>
       <div class="flex items-center gap-2">
         <button
@@ -140,11 +136,6 @@ onBeforeUnmount(() => {
               aria-hidden="true"
             />
             En mercado P2P (USDT)
-            <span
-              v-if="usdtLive"
-              title="Stream de DolarVZLA conectado"
-              class="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400"
-            />
           </p>
           <p class="mt-1 text-xl font-bold text-emerald-300">
             {{ formatVes(income.vesUsdt) }}

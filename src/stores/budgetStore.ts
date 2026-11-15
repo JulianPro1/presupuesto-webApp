@@ -240,19 +240,8 @@ export function setRatesMeta(patch: Partial<RatesMeta>): void {
   $ratesMeta.set({ ...$ratesMeta.get(), ...patch, updatedAt: Date.now() });
 }
 
-/** API key opcional de DolarVZLA (header x-dolarvzla-key) para USDT por REST */
-export const $dolarVzlaApiKey = persistentAtom<string>(
-  'presupuesto:dolarvzlaApiKey',
-  import.meta.env?.PUBLIC_DOLARVZLA_API_KEY ?? '',
-  { encode: JSON.stringify, decode: jsonOr<string>('') },
-);
-
-export function setApiKey(key: string): void {
-  $dolarVzlaApiKey.set(key.trim());
-}
-
-/** 'loading' durante el fetch BCV; 'live' cuando el stream USDT emite */
-export type RatesStatus = 'idle' | 'loading' | 'live' | 'error';
+/** 'loading' mientras se consultan las tasas */
+export type RatesStatus = 'idle' | 'loading' | 'error';
 
 export const $ratesStatus = atom<RatesStatus>('idle');
 
@@ -574,6 +563,58 @@ export function importReceivables(
   }
 
   return newReceivables;
+}
+
+/** Cantidad total de registros guardados (ingresos, gastos, por pagar y por cobrar). */
+export function countAllRecords(): number {
+  return (
+    $expenses.get().length +
+    $incomes.get().length +
+    $payables.get().length +
+    $receivables.get().length
+  );
+}
+
+/**
+ * Borra todos los listados (ingresos, gastos, por pagar y por cobrar).
+ * No afecta las tasas guardadas ni la configuración. Acción irreversible.
+ */
+export function clearAllData(): void {
+  $expenses.set([]);
+  $incomes.set([]);
+  $payables.set([]);
+  $receivables.set([]);
+  // No hay nada que exportar tras vaciar los listados.
+  $hasUnexportedChanges.set(false);
+}
+
+/**
+ * Indica si hay cambios en los listados que todavía no se han exportado a
+ * Excel. Los datos de esta app viven solo en el navegador (localStorage):
+ * si el usuario cierra la pestaña sin exportar, los perdería si borra el
+ * sitio o cambia de dispositivo. Se usa para advertir al cerrar/salir.
+ */
+export const $hasUnexportedChanges = persistentAtom<boolean>(
+  'presupuesto:dirty',
+  false,
+  { encode: JSON.stringify, decode: jsonOr<boolean>(false) },
+);
+
+/** Debe llamarse justo después de una exportación completa exitosa. */
+export function markChangesExported(): void {
+  $hasUnexportedChanges.set(false);
+}
+
+// Cualquier cambio en los listados (alta, baja, pago/cobro o importación)
+// marca los datos como "sin exportar". Se registra una sola vez al cargar
+// el módulo; las mutaciones del snapshot inicial (migración de sueldo) ya
+// ocurrieron arriba antes de este punto, así que no disparan el flag.
+if (typeof window !== 'undefined') {
+  const markDirty = () => $hasUnexportedChanges.set(true);
+  $expenses.listen(markDirty);
+  $incomes.listen(markDirty);
+  $payables.listen(markDirty);
+  $receivables.listen(markDirty);
 }
 
 function todayLocal(): string {

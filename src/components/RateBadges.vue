@@ -1,14 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue';
 import { useStore } from '@nanostores/vue';
 import { Landmark, CircleDollarSign } from 'lucide-vue-next';
-import { $rates, $ratesStatus } from '../stores/budgetStore';
+import { $rates } from '../stores/budgetStore';
 import { formatVes } from '../utils/formatters';
 
 const rates = useStore($rates);
-const status = useStore($ratesStatus);
-
-const live = computed(() => status.value === 'live');
 </script>
 
 <template>
@@ -28,11 +24,6 @@ const live = computed(() => status.value === 'live');
       <CircleDollarSign class="h-3 w-3" aria-hidden="true" />
       USDT
       {{ formatVes(rates.usdt) }}
-      <span
-        v-if="live"
-        class="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500"
-        aria-label="En vivo"
-      />
     </span>
   </div>
 </template>

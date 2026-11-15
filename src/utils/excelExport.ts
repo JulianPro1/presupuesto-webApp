@@ -363,3 +363,93 @@ export function exportBudgetToExcel({
   const stamp = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
   XLSX.writeFile(wb, `presupuesto-${stamp}.xlsx`);
 }
+
+export type ModuleKind = 'expenses' | 'incomes' | 'payables' | 'receivables';
+
+type ModuleEntity = Expense | Income | Payable | Receivable;
+
+const MODULE_SHEET_CONFIG: Record<
+  ModuleKind,
+  Pick<SheetOptions, 'title' | 'thirdHeader' | 'withBalance' | 'withDueDate'> & {
+    sheetName: string;
+    slug: string;
+  }
+> = {
+  incomes: {
+    title: 'INGRESOS DEL MES',
+    thirdHeader: 'Fuente',
+    sheetName: 'Ingresos',
+    slug: 'ingresos',
+  },
+  expenses: {
+    title: 'REPORTE DE PRESUPUESTO MENSUAL',
+    thirdHeader: 'Categoría',
+    sheetName: 'Gastos',
+    withBalance: true,
+    slug: 'gastos',
+  },
+  payables: {
+    title: 'CUENTAS POR PAGAR',
+    thirdHeader: 'Categoría',
+    sheetName: 'Por pagar',
+    withDueDate: true,
+    slug: 'por-pagar',
+  },
+  receivables: {
+    title: 'CUENTAS POR COBRAR',
+    thirdHeader: 'Fuente',
+    sheetName: 'Por cobrar',
+    withDueDate: true,
+    slug: 'por-cobrar',
+  },
+};
+
+function toSheetRow(kind: ModuleKind, item: ModuleEntity): SheetRow {
+  const isIncomeLike = kind === 'incomes' || kind === 'receivables';
+  return {
+    date: item.date,
+    description: item.description,
+    group: isIncomeLike
+      ? (item as Income | Receivable).source
+      : (item as Expense | Payable).category,
+    amount: item.amount,
+    currency: item.currency,
+    rateBcv: item.rateBcv,
+    rateUsdt: item.rateUsdt,
+    dueDate: (item as Payable | Receivable).dueDate,
+  };
+}
+
+/**
+ * Genera y descarga un .xlsx con una sola hoja correspondiente a un único
+ * módulo (ingresos, gastos, por pagar o por cobrar), para exportaciones
+ * específicas desde "Más opciones".
+ */
+export function exportModuleToExcel(
+  kind: ModuleKind,
+  items: readonly ModuleEntity[],
+  rates: Rates,
+  incomeUsd: number,
+  date: Date = new Date(),
+): void {
+  const cfg = MODULE_SHEET_CONFIG[kind];
+  const wb = XLSX.utils.book_new();
+
+  XLSX.utils.book_append_sheet(
+    wb,
+    buildDataSheet({
+      title: cfg.title,
+      thirdHeader: cfg.thirdHeader,
+      rows: items.map((item) => toSheetRow(kind, item)),
+      rates,
+      incomeUsd,
+      date,
+      withBalance: cfg.withBalance,
+      withDueDate: cfg.withDueDate,
+    }),
+    cfg.sheetName,
+  );
+
+  const stamp = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  XLSX.writeFile(wb, `presupuesto-${cfg.slug}-${stamp}.xlsx`);
+}

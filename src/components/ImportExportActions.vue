@@ -9,6 +9,7 @@ import {
   $receivables,
   $rates,
   $totalIncome,
+  markChangesExported,
 } from '../stores/budgetStore';
 import { exportBudgetToExcel } from '../utils/excelExport';
 import { useSwalToast } from '@/composables/ui/useSwalToast';
@@ -43,6 +44,7 @@ function handleExport() {
     rates: rates.value,
     incomeUsd: totalIncome.value.usd,
   });
+  markChangesExported();
   showSuccess(`Excel generado con ${total} registro(s)`);
 }
 </script>

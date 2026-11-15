@@ -2,6 +2,8 @@
 import '../styles/global.css';
 import { ClientRouter } from 'astro:transitions';
 import RateBadges from '../components/RateBadges.vue';
+import MoreOptionsButton from '../components/MoreOptionsButton.vue';
+import UnsavedChangesGuard from '../components/UnsavedChangesGuard.vue';
 
 interface Props {
   title?: string;
@@ -108,7 +110,7 @@ const navLinks = [
           </svg>
         </div>
         <span
-          class="shrink-0 text-sm font-extrabold tracking-tight text-slate-900"
+          class="hidden shrink-0 text-sm font-extrabold tracking-tight text-slate-900 md:inline"
         >
           Presupuesto
         </span>
@@ -152,7 +154,14 @@ const navLinks = [
           }
         </nav>
 
-        <RateBadges client:only="vue" class="ml-auto md:hidden" />
+        <div class="hidden md:contents">
+          <MoreOptionsButton client:only="vue" />
+        </div>
+
+        <div class="ml-auto flex items-center gap-2 md:hidden">
+          <RateBadges client:only="vue" />
+           <MoreOptionsButton client:only="vue" compact />
+        </div>
       </div>
     </header>
 
@@ -205,5 +214,7 @@ const navLinks = [
       Los datos se guardan localmente en tu navegador · Exporta a Excel para
       respaldar
     </footer>
+
+    <UnsavedChangesGuard client:only="vue" />
   </body>
 </html>
