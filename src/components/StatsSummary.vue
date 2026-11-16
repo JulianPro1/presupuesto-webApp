@@ -2,9 +2,9 @@
 import { computed } from 'vue';
 import { useStore } from '@nanostores/vue';
 import {
-  Banknote,
+  TrendingUp,
+  TrendingDown,
   PiggyBank,
-  Receipt,
   CalendarClock,
   HandCoins,
 } from 'lucide-vue-next';
@@ -37,7 +37,7 @@ const pl = (n: number, word: string) => (n === 1 ? word : `${word}s`);
       <p
         class="flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-slate-500 uppercase"
       >
-        <Banknote class="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" />
+        <TrendingUp class="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" />
         Ingresos
       </p>
       <p class="mt-1.5 text-lg font-bold text-emerald-600">
@@ -55,7 +55,7 @@ const pl = (n: number, word: string) => (n === 1 ? word : `${word}s`);
       <p
         class="flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-slate-500 uppercase"
       >
-        <Receipt class="h-3.5 w-3.5 text-rose-600" aria-hidden="true" />
+        <TrendingDown class="h-3.5 w-3.5 text-rose-600" aria-hidden="true" />
         Gastos del mes
       </p>
       <p class="mt-1.5 text-lg font-bold text-rose-600">

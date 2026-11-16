@@ -2,7 +2,7 @@
 import { ref } from 'vue';
 import { useStore } from '@nanostores/vue';
 import { navigate } from 'astro:transitions/client';
-import { CirclePlus, Calculator } from 'lucide-vue-next';
+import { CirclePlus, TrendingDown, Calculator } from 'lucide-vue-next';
 import BaseInput from '@/components/BaseInput.vue';
 import CalculatorModal from '@/components/CalculatorModal.vue';
 import MultiselectCustom from '@/components/MultiselectCustom.vue';
@@ -102,7 +102,7 @@ function handleSubmit() {
   >
     <div v-if="!inModal" class="flex items-center justify-between gap-2">
       <h2 class="flex items-center gap-2 text-base font-bold text-slate-900">
-        <CirclePlus class="h-5 w-5 text-rose-600" aria-hidden="true" />
+        <TrendingDown class="h-5 w-5 text-rose-600" aria-hidden="true" />
         Registrar gasto
       </h2>
       <button

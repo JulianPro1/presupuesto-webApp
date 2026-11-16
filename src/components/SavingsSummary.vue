@@ -3,11 +3,10 @@ import { computed } from 'vue';
 import { useStore } from '@nanostores/vue';
 import {
   PiggyBank,
-  Banknote,
-  HandCoins,
-  Receipt,
-  CalendarClock,
   TrendingUp,
+  TrendingDown,
+  HandCoins,
+  CalendarClock,
 } from 'lucide-vue-next';
 import { $rates, $savings } from '../stores/budgetStore';
 import { formatUsd, formatVes, formatPct } from '../utils/formatters';
@@ -40,7 +39,7 @@ const negative = computed(() => savings.value.projectedUsd < 0);
       <dl class="mt-4 divide-y divide-slate-100 text-sm">
         <div class="flex items-center justify-between gap-4 py-2.5">
           <dt class="flex items-center gap-2 font-medium text-slate-600">
-            <Banknote class="h-4 w-4 text-emerald-600" aria-hidden="true" />
+            <TrendingUp class="h-4 w-4 text-emerald-600" aria-hidden="true" />
             Ingresos registrados
           </dt>
           <dd class="font-semibold whitespace-nowrap text-emerald-600">
@@ -60,7 +59,7 @@ const negative = computed(() => savings.value.projectedUsd < 0);
 
         <div class="flex items-center justify-between gap-4 py-2.5">
           <dt class="flex items-center gap-2 font-medium text-slate-600">
-            <Receipt class="h-4 w-4 text-rose-600" aria-hidden="true" />
+            <TrendingDown class="h-4 w-4 text-rose-600" aria-hidden="true" />
             Gastos registrados
           </dt>
           <dd class="font-semibold whitespace-nowrap text-rose-600">
