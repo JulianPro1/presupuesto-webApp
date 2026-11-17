@@ -301,7 +301,7 @@ function reset() {
             v-if="missingRates"
             class="mt-1 text-xs font-semibold text-amber-600"
           >
-            Aún no hay tasas cargadas — configúralas desde Analíticas →
+            Aún no hay tasas cargadas — configúralas desde Resumen →
             «Tasa manual».
           </p>
         </template>

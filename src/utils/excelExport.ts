@@ -5,6 +5,7 @@ import type {
   Payable,
   Receivable,
   Rates,
+  CategoryBudgetStatus,
 } from '../stores/budgetStore';
 import { contraValues } from '../stores/budgetStore';
 import { monthLabel } from './formatters';
@@ -26,7 +27,26 @@ export interface ExportInput {
   rates: Rates;
   /** Total de ingresos en USDT (para el saldo disponible) */
   incomeUsd: number;
+  /** Resumen de presupuestos por categoría (hoja "Presupuestos") */
+  budgetSummary?: CategoryBudgetStatus[];
+  /** Nombre de archivo personalizado (sin extensión); por defecto `presupuesto-YYYY-MM` */
+  fileName?: string;
   date?: Date;
+}
+
+/**
+ * Resuelve el nombre final del .xlsx: sanea el nombre personalizado
+ * (sin rutas ni caracteres inválidos), agrega `.xlsx` si falta y cae
+ * al nombre por defecto cuando queda vacío.
+ */
+function resolveXlsxName(custom: string | undefined, fallbackBase: string): string {
+  const clean = (custom ?? '')
+    .trim()
+    .replace(/[\\\/:*?"<>|\u0000-\u001f]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  const base = clean || fallbackBase;
+  return base.toLowerCase().endsWith('.xlsx') ? base : `${base}.xlsx`;
 }
 
 interface SheetRow {
@@ -259,6 +279,8 @@ export function exportBudgetToExcel({
   receivables,
   rates,
   incomeUsd,
+  budgetSummary,
+  fileName,
   date = new Date(),
 }: ExportInput): void {
   const wb = XLSX.utils.book_new();
@@ -360,8 +382,59 @@ export function exportBudgetToExcel({
     'Por cobrar',
   );
 
+  XLSX.utils.book_append_sheet(
+    wb,
+    buildBudgetsSheet(budgetSummary ?? []),
+    'Presupuestos',
+  );
+
   const stamp = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-  XLSX.writeFile(wb, `presupuesto-${stamp}.xlsx`);
+  XLSX.writeFile(wb, resolveXlsxName(fileName, `presupuesto-${stamp}`));
+}
+
+/**
+ * Hoja simple de presupuestos por categoría. Solo las dos primeras
+ * columnas (Categoría, Presupuesto USDT) son las que el importador
+ * requiere; las demás son informativas del mes en curso.
+ */
+function buildBudgetsSheet(summary: CategoryBudgetStatus[]): XLSX.WorkSheet {
+  const aoa: (string | number)[][] = [
+    ['PRESUPUESTOS POR CATEGORÍA (USDT MENSUAL)'],
+    [],
+    ['Categoría', 'Presupuesto USDT', 'Consumido USDT', '% usado', 'Estado'],
+    ...summary.map((s) => [
+      s.category,
+      s.budgetUsd,
+      s.consumedUsd,
+      s.budgetUsd > 0 ? s.pctUsed / 100 : '',
+      s.status === 'over'
+        ? 'Excedido'
+        : s.status === 'near'
+          ? 'Cerca del límite'
+          : s.status === 'ok'
+            ? 'En rango'
+            : 'Sin presupuesto',
+    ]),
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{ wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 10 }, { wch: 18 }];
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }];
+  return ws;
+}
+
+/**
+ * Genera y descarga un .xlsx con solo la hoja "Presupuestos" para la
+ * exportación específica del módulo desde "Más opciones".
+ */
+export function exportBudgetsToExcel(
+  summary: CategoryBudgetStatus[],
+  date: Date = new Date(),
+  fileName?: string,
+): void {
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, buildBudgetsSheet(summary), 'Presupuestos');
+  const stamp = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  XLSX.writeFile(wb, resolveXlsxName(fileName, `presupuestos-${stamp}`));
 }
 
 export type ModuleKind = 'expenses' | 'incomes' | 'payables' | 'receivables';
@@ -431,6 +504,7 @@ export function exportModuleToExcel(
   rates: Rates,
   incomeUsd: number,
   date: Date = new Date(),
+  fileName?: string,
 ): void {
   const cfg = MODULE_SHEET_CONFIG[kind];
   const wb = XLSX.utils.book_new();
@@ -451,5 +525,5 @@ export function exportModuleToExcel(
   );
 
   const stamp = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-  XLSX.writeFile(wb, `presupuesto-${cfg.slug}-${stamp}.xlsx`);
+  XLSX.writeFile(wb, resolveXlsxName(fileName, `presupuesto-${cfg.slug}-${stamp}`));
 }

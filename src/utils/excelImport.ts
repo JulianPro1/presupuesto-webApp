@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import {
   CATEGORIES,
   INCOME_SOURCES,
+  normalizeCategory,
   type Category,
   type ExpenseCurrency,
   type IncomeSource,
@@ -61,7 +62,17 @@ export interface ParsedReceivableItem {
   rateUsdt?: number;
 }
 
-export type SheetKind = 'expenses' | 'incomes' | 'payables' | 'receivables';
+export interface ParsedBudgetItem {
+  category: Category;
+  amountUsd: number;
+}
+
+export type SheetKind =
+  | 'expenses'
+  | 'incomes'
+  | 'payables'
+  | 'receivables'
+  | 'budgets';
 
 export interface DetectedSheet {
   kind: SheetKind;
@@ -76,6 +87,7 @@ export interface WorkbookValidationResult {
   incomes: ParsedIncomeItem[];
   payables: ParsedPayableItem[];
   receivables: ParsedReceivableItem[];
+  budgets: ParsedBudgetItem[];
   sheets: DetectedSheet[];
   /** Filas de datos detectadas en total (todas las hojas) */
   totalRows: number;
@@ -105,7 +117,9 @@ function matchCategory(raw: unknown): Category | null {
       return cat;
     }
   }
-  return null;
+  // Compatibilidad con archivos antiguos: categorías eliminadas
+  // (Vivienda → Servicios, Entretenimiento → Ocio).
+  return normalizeCategory(raw);
 }
 
 /**
@@ -199,10 +213,13 @@ function parseDateCell(val: unknown): string | null {
 /** Clasifica una hoja del workbook por su nombre */
 function classifySheet(name: string): SheetKind | null {
   const s = cleanStr(name);
+  // "Presupuestos" debe evaluarse antes que "Gastos": el nombre contiene
+  // "presupuesto", que antes caía en la regex de gastos.
+  if (/presupuesto|budget/.test(s)) return 'budgets';
   if (/cobrar|receiv/.test(s)) return 'receivables';
   if (/ingreso|income/.test(s)) return 'incomes';
   if (/pagar|pendiente|deuda|payable/.test(s)) return 'payables';
-  if (/gasto|presupuesto|expense|plantilla/.test(s)) return 'expenses';
+  if (/gasto|expense|plantilla/.test(s)) return 'expenses';
   return null;
 }
 
@@ -654,6 +671,146 @@ function parseDataSheet(
 }
 
 /**
+ * Parsea la hoja "Presupuestos": a diferencia de las hojas de movimientos,
+ * no tiene Fecha/Descripción/Moneda — solo Categoría + monto en USDT.
+ * Tolera filas de título en blanco arriba y columnas extra informativas.
+ */
+function parseBudgetsSheet(
+  ws: XLSX.WorkSheet,
+  sheetName: string,
+): SheetParseOutcome {
+  const errors: ExcelValidationError[] = [];
+  const items: ParsedRow[] = [];
+  let totalRows = 0;
+
+  if (!ws['!ref']) {
+    return { items, errors, totalRows };
+  }
+
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const maxRows = range.e.r + 1;
+  const maxCols = range.e.c + 1;
+
+  // Localizar la fila de encabezados: debe tener una celda "categor..."
+  // y otra que haga referencia al presupuesto/monto en USDT.
+  let headerRowIndex = -1;
+  let catCol = -1;
+  let amountCol = -1;
+
+  for (let r = 0; r < Math.min(maxRows, 15); r++) {
+    let rowCat = -1;
+    let rowAmount = -1;
+    for (let c = 0; c < maxCols; c++) {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      const cell = ws[addr];
+      const val = cleanStr(cell ? cell.v : '');
+      if (rowCat === -1 && /categor/i.test(val)) rowCat = c;
+      if (
+        rowAmount === -1 &&
+        /presupuesto|budget|monto|usdt/i.test(val)
+      ) {
+        rowAmount = c;
+      }
+    }
+    if (rowCat !== -1 && rowAmount !== -1) {
+      headerRowIndex = r;
+      catCol = rowCat;
+      amountCol = rowAmount;
+      break;
+    }
+  }
+
+  if (headerRowIndex === -1) {
+    errors.push({
+      cell: 'A1',
+      row: 1,
+      col: 0,
+      colLetter: 'A',
+      header: 'Encabezados',
+      value: '',
+      message: `No se encontraron los encabezados obligatorios en la hoja "${sheetName}". Debe incluir "Categoría" y "Presupuesto USDT".`,
+      sheet: sheetName,
+    });
+    return { items, errors, totalRows: 0 };
+  }
+
+  for (let r = headerRowIndex + 1; r < maxRows; r++) {
+    const excelRow = r + 1;
+    const rawCategory = (() => {
+      const addr = XLSX.utils.encode_cell({ r, c: catCol });
+      const cell = ws[addr];
+      return cell ? cell.v : '';
+    })();
+    const rawAmount = (() => {
+      const addr = XLSX.utils.encode_cell({ r, c: amountCol });
+      const cell = ws[addr];
+      return cell ? cell.v : '';
+    })();
+
+    // Fila completamente vacía → ignorar silenciosamente.
+    const catStr = cleanStr(rawCategory);
+    const amountStr = cleanStr(rawAmount);
+    if (!catStr && !amountStr) continue;
+
+    totalRows++;
+    const catColLetter = XLSX.utils.encode_col(catCol);
+    const amtColLetter = XLSX.utils.encode_col(amountCol);
+
+    // Categoría obligatoria y válida.
+    const matchedCategory = matchCategory(rawCategory);
+    if (!matchedCategory) {
+      errors.push({
+        cell: `${catColLetter}${excelRow}`,
+        row: excelRow,
+        col: catCol,
+        colLetter: catColLetter,
+        header: 'Categoría',
+        value: catStr,
+        message: `Categoría no válida. Opciones: ${CATEGORIES.join(', ')}.`,
+        sheet: sheetName,
+      });
+      continue;
+    }
+
+    // Monto obligatorio, numérico y mayor o igual a 0 (0 = quitar presupuesto).
+    const amountNum =
+      typeof rawAmount === 'number'
+        ? rawAmount
+        : parseAmount(String(rawAmount ?? ''));
+    if (
+      rawAmount === undefined ||
+      rawAmount === null ||
+      amountStr === '' ||
+      !Number.isFinite(amountNum) ||
+      amountNum < 0
+    ) {
+      errors.push({
+        cell: `${amtColLetter}${excelRow}`,
+        row: excelRow,
+        col: amountCol,
+        colLetter: amtColLetter,
+        header: 'Presupuesto USDT',
+        value: amountStr,
+        message:
+          'El presupuesto debe ser un número mayor o igual a 0 en USDT. Usa 0 para quitar el presupuesto de la categoría.',
+        sheet: sheetName,
+      });
+      continue;
+    }
+
+    items.push({
+      date: '',
+      description: '',
+      group: matchedCategory,
+      amount: amountNum,
+      currency: 'USDT',
+    });
+  }
+
+  return { items, errors, totalRows };
+}
+
+/**
  * Lee un workbook Excel y valida las hojas reconocidas ("Ingresos",
  * "Gastos", "Por pagar", "Por cobrar"). Si el archivo no tiene hojas
  * reconocibles, se intenta importar la primera hoja como gastos
@@ -675,6 +832,7 @@ export async function parseAndValidateWorkbook(
     incomes: [],
     payables: [],
     receivables: [],
+    budgets: [],
     sheets: [],
     totalRows: 0,
   };
@@ -720,7 +878,10 @@ export async function parseAndValidateWorkbook(
 
   for (const { name, kind } of targets) {
     const ws = wb.Sheets[name];
-    const outcome = parseDataSheet(ws, name, kind);
+    const outcome =
+      kind === 'budgets'
+        ? parseBudgetsSheet(ws, name)
+        : parseDataSheet(ws, name, kind);
     result.errors.push(...outcome.errors);
     result.totalRows += outcome.totalRows;
 
@@ -733,6 +894,13 @@ export async function parseAndValidateWorkbook(
     }
 
     for (const item of outcome.items) {
+      if (kind === 'budgets') {
+        result.budgets.push({
+          category: item.group as Category,
+          amountUsd: item.amount,
+        });
+        continue;
+      }
       const base = {
         date: item.date,
         description: item.description,
@@ -848,7 +1016,7 @@ export function downloadBudgetTemplate(): void {
     'Tasa USDT',
   ];
   const payableRows = [
-    ['2026-10-05', 'Alquiler del mes', 'Vivienda', 300, 'USDT', '2026-10-10', '', ''],
+    ['2026-10-05', 'Alquiler del mes', 'Servicios', 300, 'USDT', '2026-10-10', '', ''],
     ['2026-10-06', 'Mensualidad del gimnasio', 'Salud', 20, 'USDT', '2026-10-15', '', ''],
   ];
   const wsPayables = XLSX.utils.aoa_to_sheet([payableHeaders, ...payableRows]);
@@ -895,12 +1063,24 @@ export function downloadBudgetTemplate(): void {
   ];
   XLSX.utils.book_append_sheet(wb, wsReceivables, 'Por cobrar');
 
-  // Hoja 5: Instrucciones y opciones permitidas
+  // Hoja 5: Presupuestos (mensuales, en USDT por categoría)
+  const budgetHeaders = ['Categoría', 'Presupuesto USDT'];
+  const budgetRows = [
+    ['Alimentación', 150],
+    ['Servicios', 80],
+    ['Transporte', 60],
+    ['Ocio', 40],
+  ];
+  const wsBudgets = XLSX.utils.aoa_to_sheet([budgetHeaders, ...budgetRows]);
+  wsBudgets['!cols'] = [{ wch: 18 }, { wch: 18 }];
+  XLSX.utils.book_append_sheet(wb, wsBudgets, 'Presupuestos');
+
+  // Hoja 6: Instrucciones y opciones permitidas
   const instructions = [
     ['GUÍA DE LLENADO DE LA PLANTILLA'],
     [],
     [
-      'El archivo contiene cuatro hojas: "Ingresos", "Gastos", "Por pagar" y "Por cobrar".',
+      'El archivo contiene cinco hojas: "Ingresos", "Gastos", "Por pagar", "Por cobrar" y "Presupuestos".',
       'Todas se importan juntas desde el mismo archivo.',
     ],
     [],
@@ -959,6 +1139,12 @@ export function downloadBudgetTemplate(): void {
       'Número',
       'Si se deja vacío, la app aplicará automáticamente la tasa USDT actual.',
     ],
+    [
+      'Presupuestos (hoja "Presupuestos")',
+      'SÍ',
+      'Categoría + monto USDT',
+      'Monto mensual recurrente por categoría. Usa 0 para quitar el presupuesto.',
+    ],
   ];
 
   const wsInstructions = XLSX.utils.aoa_to_sheet(instructions);
@@ -979,6 +1165,7 @@ const MODULE_LABELS: Record<SheetKind, string> = {
   expenses: 'Gastos',
   payables: 'Por pagar',
   receivables: 'Por cobrar',
+  budgets: 'Presupuestos',
 };
 
 const MODULE_SLUGS: Record<SheetKind, string> = {
@@ -986,6 +1173,7 @@ const MODULE_SLUGS: Record<SheetKind, string> = {
   expenses: 'gastos',
   payables: 'por-pagar',
   receivables: 'por-cobrar',
+  budgets: 'presupuestos',
 };
 
 const MODULE_EXAMPLE_ROWS: Record<SheetKind, (string | number)[][]> = {
@@ -1000,12 +1188,18 @@ const MODULE_EXAMPLE_ROWS: Record<SheetKind, (string | number)[][]> = {
     ['2026-10-03', 'Consultas médicas y farmacia', 'Salud', 25.0, 'USDT', '', ''],
   ],
   payables: [
-    ['2026-10-05', 'Alquiler del mes', 'Vivienda', 300, 'USDT', '2026-10-10', '', ''],
+    ['2026-10-05', 'Alquiler del mes', 'Servicios', 300, 'USDT', '2026-10-10', '', ''],
     ['2026-10-06', 'Mensualidad del gimnasio', 'Salud', 20, 'USDT', '2026-10-15', '', ''],
   ],
   receivables: [
     ['2026-10-05', 'Pago pendiente proyecto freelance', 'Freelance', 80, 'USDT', '2026-10-20', '', ''],
     ['2026-10-07', 'Venta por cobrar equipo usado', 'Ventas', 60, 'USDT', '2026-10-25', '', ''],
+  ],
+  budgets: [
+    ['Alimentación', 150],
+    ['Servicios', 80],
+    ['Transporte', 60],
+    ['Ocio', 40],
   ],
 };
 
@@ -1016,10 +1210,56 @@ const MODULE_EXAMPLE_ROWS: Record<SheetKind, (string | number)[][]> = {
  */
 export function downloadModuleTemplate(kind: SheetKind): void {
   const wb = XLSX.utils.book_new();
+  const sheetName = MODULE_LABELS[kind];
+
+  // Los presupuestos tienen estructura distinta: solo Categoría + monto USDT.
+  if (kind === 'budgets') {
+    const headers = ['Categoría', 'Presupuesto USDT'];
+    const ws = XLSX.utils.aoa_to_sheet([
+      headers,
+      ...MODULE_EXAMPLE_ROWS.budgets,
+    ]);
+    ws['!cols'] = [{ wch: 20 }, { wch: 18 }];
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+    const instructions: (string | number)[][] = [
+      [`GUÍA DE LLENADO — ${sheetName.toUpperCase()}`],
+      [],
+      [
+        `Esta plantilla contiene solo la hoja "${sheetName}". Impórtala desde`,
+        `"Más opciones → Importar ${sheetName}".`,
+      ],
+      [],
+      [
+        'El presupuesto es mensual y se define en USDT por categoría.',
+        'El consumo se reinicia cada mes automáticamente.',
+      ],
+      [],
+      ['Columna', 'Obligatorio', 'Formato aceptado', 'Notas'],
+      [
+        'Categoría',
+        'SÍ',
+        'Categoría exacta',
+        `Opciones válidas: ${CATEGORIES.join(', ')}.`,
+      ],
+      [
+        'Presupuesto USDT',
+        'SÍ',
+        'Número >= 0',
+        'Monto mensual en USDT. Usa 0 para quitar el presupuesto de la categoría.',
+      ],
+    ];
+    const wsInstructions = XLSX.utils.aoa_to_sheet(instructions);
+    wsInstructions['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 20 }, { wch: 60 }];
+    XLSX.utils.book_append_sheet(wb, wsInstructions, 'Instrucciones');
+
+    XLSX.writeFile(wb, `plantilla-presupuesto-${MODULE_SLUGS[kind]}.xlsx`);
+    return;
+  }
+
   const isIncomeLike = kind === 'incomes' || kind === 'receivables';
   const hasDueDate = kind === 'payables' || kind === 'receivables';
   const groupHeader = isIncomeLike ? 'Fuente' : 'Categoría';
-  const sheetName = MODULE_LABELS[kind];
   const groupOptions = isIncomeLike ? INCOME_SOURCES : CATEGORIES;
 
   const headers = ['Fecha', 'Descripción', groupHeader, 'Monto', 'Moneda'];

@@ -52,15 +52,17 @@ const icons: Record<string, string> = {
     '<path d="M11 17h3v2a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-3a3.16 3.16 0 0 0 2-2h1a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1h-1a5 5 0 0 0-2-4V3a4 4 0 0 0-3.2 1.6l-.3.4H11a6 6 0 0 0-6 6v1a5 5 0 0 0 2 4v3a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1z"/><path d="M16 10h.01"/><path d="M2 8v1a2 2 0 0 0 2 2h1"/>',
   calculator:
     '<rect width="16" height="20" x="4" y="2" rx="2"/><line x1="8" x2="16" y1="6" y2="6"/><line x1="16" x2="16" y1="14" y2="18"/><path d="M16 10h.01"/><path d="M12 10h.01"/><path d="M8 10h.01"/><path d="M12 14h.01"/><path d="M8 14h.01"/><path d="M12 18h.01"/><path d="M8 18h.01"/>',
+  target:
+    '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
 };
 
 const navLinks = [
-  { href: '/', label: 'Analíticas', short: 'Inicio', icon: 'chart-column', color: 'text-sky-600', match: (p: string) => p === '/' },
+  { href: '/', label: 'Resumen', short: 'Inicio', icon: 'chart-column', color: 'text-sky-600', match: (p: string) => p === '/' },
   { href: '/ingresos/List', label: 'Ingresos', short: 'Ingresos', icon: 'trending-up', color: 'text-emerald-600', match: (p: string) => p.startsWith('/ingresos') },
   { href: '/gastos/List', label: 'Gastos', short: 'Gastos', icon: 'trending-down', color: 'text-rose-600', match: (p: string) => p.startsWith('/gastos') },
   { href: '/por-pagar/List', label: 'C. Por pagar', short: 'Pagar', icon: 'calendar-clock', color: 'text-amber-600', match: (p: string) => p.startsWith('/por-pagar') },
   { href: '/por-cobrar/List', label: 'C. Por cobrar', short: 'Cobrar', icon: 'hand-coins', color: 'text-violet-600', match: (p: string) => p.startsWith('/por-cobrar') },
-  { href: '/saldo-a-favor', label: 'Saldo a favor', short: 'Saldo', icon: 'piggy-bank', color: 'text-teal-600', match: (p: string) => p.startsWith('/saldo-a-favor') },
+  { href: '/presupuestos', label: 'Presupuestos', short: 'Presup.', icon: 'target', color: 'text-blue-600', match: (p: string) => p.startsWith('/presupuestos') },
   { href: '/calculadora', label: 'Calculadora', short: 'Calc.', icon: 'calculator', color: 'text-slate-600', match: (p: string) => p.startsWith('/calculadora') },
 ];
 ---
@@ -109,11 +111,7 @@ const navLinks = [
             <path d="M18 12a2 2 0 0 0 0 4h4v-4Z"></path>
           </svg>
         </div>
-        <span
-          class="hidden shrink-0 text-sm font-extrabold tracking-tight text-slate-900 md:inline"
-        >
-          Presupuesto
-        </span>
+
 
         <nav
           class="ml-5 hidden min-w-0 items-center gap-0.5 overflow-x-auto rounded-full border border-slate-200/70 bg-slate-100/80 p-1 md:flex [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"

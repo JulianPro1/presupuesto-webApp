@@ -9,10 +9,12 @@
  * que este componente activa cuando hay cambios sin exportar, junto con un
  * aviso persistente en pantalla con acceso directo a exportar.
  */
-import { computed, onBeforeUnmount, onMounted } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useStore } from '@nanostores/vue';
 import { TriangleAlert, FileSpreadsheet, X } from 'lucide-vue-next';
 import {
+  $budgets,
+  $budgetSummary,
   $expenses,
   $hasUnexportedChanges,
   $incomes,
@@ -24,6 +26,7 @@ import {
 } from '@/stores/budgetStore';
 import { exportBudgetToExcel } from '@/utils/excelExport';
 import { useSwalToast } from '@/composables/ui/useSwalToast';
+import ExportFileModal from '@/components/ExportFileModal.vue';
 
 const { showSuccess, showInfo } = useSwalToast();
 
@@ -34,13 +37,16 @@ const payables = useStore($payables);
 const receivables = useStore($receivables);
 const rates = useStore($rates);
 const totalIncome = useStore($totalIncome);
+const budgets = useStore($budgets);
+const budgetSummary = useStore($budgetSummary);
 
 const totalRecords = computed(
   () =>
     expenses.value.length +
     incomes.value.length +
     payables.value.length +
-    receivables.value.length,
+    receivables.value.length +
+    Object.keys(budgets.value).length,
 );
 
 const showBanner = computed(() => dirty.value && totalRecords.value > 0);
@@ -61,11 +67,24 @@ onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload);
 });
 
+const showExportModal = ref(false);
+const exportDefaultName = ref('');
+
+function monthStamp(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
 function handleExportNow() {
   if (totalRecords.value === 0) {
     showInfo('No hay registros para exportar');
     return;
   }
+  exportDefaultName.value = `presupuesto-${monthStamp()}`;
+  showExportModal.value = true;
+}
+
+function handleExportConfirm(fileName: string) {
   exportBudgetToExcel({
     expenses: expenses.value,
     incomes: incomes.value,
@@ -73,9 +92,12 @@ function handleExportNow() {
     receivables: receivables.value,
     rates: rates.value,
     incomeUsd: totalIncome.value.usd,
+    budgetSummary: budgetSummary.value,
+    fileName,
   });
   markChangesExported();
   showSuccess(`Excel generado con ${totalRecords.value} registro(s)`);
+  showExportModal.value = false;
 }
 
 /** "Descartar" solo oculta el aviso hasta el próximo cambio; no borra nada. */
@@ -116,4 +138,12 @@ function handleDismiss() {
       </button>
     </div>
   </div>
+
+  <ExportFileModal
+    :open="showExportModal"
+    :default-name="exportDefaultName"
+    scope-label="todo el presupuesto"
+    @close="showExportModal = false"
+    @confirm="handleExportConfirm"
+  />
 </template>

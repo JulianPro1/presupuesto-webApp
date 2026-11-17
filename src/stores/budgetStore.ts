@@ -3,17 +3,51 @@ import { persistentAtom } from '@nanostores/persistent';
 
 export const CATEGORIES = [
   'Alimentación',
-  'Vivienda',
   'Servicios',
   'Transporte',
   'Salud',
   'Educación',
-  'Entretenimiento',
+  'Ropa y calzado',
+  'Higiene personal',
+  'Mascotas',
   'Ocio',
   'Otros',
 ] as const;
 
 export type Category = (typeof CATEGORIES)[number];
+
+/**
+ * Categorías eliminadas → destino de migración para datos persistidos
+ * e importaciones Excel antiguas.
+ */
+const LEGACY_CATEGORY_MAP: Record<string, Category> = {
+  vivienda: 'Servicios',
+  entretenimiento: 'Ocio',
+  'seguros y finanzas': 'Higiene personal',
+};
+
+const CATEGORY_LOOKUP = new Map(
+  CATEGORIES.map((c) => [normalizeKey(c), c]),
+);
+
+function normalizeKey(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+/**
+ * Normaliza una categoría (posiblemente legada) contra CATEGORIES.
+ * Acepta strings crudos de localStorage o Excel.
+ */
+export function normalizeCategory(raw: unknown): Category | null {
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  const key = normalizeKey(raw);
+  const mapped = LEGACY_CATEGORY_MAP[key] ?? key;
+  return CATEGORY_LOOKUP.get(normalizeKey(mapped)) ?? null;
+}
 
 export const INCOME_SOURCES = [
   'Sueldo',
@@ -121,6 +155,7 @@ export const $expenses = persistentAtom<Expense[]>(
         if (!Array.isArray(value)) return [];
         return (value as Partial<Expense>[]).map((e) => ({
           ...e,
+          category: normalizeCategory(e.category) ?? 'Otros',
           rateBcv: typeof e.rateBcv === 'number' ? e.rateBcv : 0,
           rateUsdt: typeof e.rateUsdt === 'number' ? e.rateUsdt : 0,
         })) as Expense[];
@@ -163,6 +198,7 @@ export const $payables = persistentAtom<Payable[]>(
         if (!Array.isArray(value)) return [];
         return (value as Partial<Payable>[]).map((e) => ({
           ...e,
+          category: normalizeCategory(e.category) ?? 'Otros',
           rateBcv: typeof e.rateBcv === 'number' ? e.rateBcv : 0,
           rateUsdt: typeof e.rateUsdt === 'number' ? e.rateUsdt : 0,
         })) as Payable[];
@@ -190,6 +226,31 @@ export const $receivables = persistentAtom<Receivable[]>(
       } catch {
         return [];
       }
+    },
+  },
+);
+
+/**
+ * Presupuesto mensual por categoría (USDT). La clave es la categoría y el
+ * valor el monto asignado cada mes; el consumo se calcula solo con los
+ * movimientos del mes en curso, así que el presupuesto "se reinicia" solo.
+ */
+export const $budgets = persistentAtom<Record<string, number>>(
+  'presupuesto:budgets',
+  {},
+  {
+    encode: JSON.stringify,
+    decode: (raw) => {
+      const value = jsonOr<Record<string, number>>({})(raw);
+      // Migrar claves de categorías eliminadas (Vivienda, Entretenimiento)
+      // sumando el monto si dos claves colisionan en la misma categoría.
+      const migrated: Record<string, number> = {};
+      for (const [key, amount] of Object.entries(value)) {
+        const cat = normalizeCategory(key);
+        if (!cat || typeof amount !== 'number') continue;
+        migrated[cat] = (migrated[cat] ?? 0) + amount;
+      }
+      return migrated;
     },
   },
 );
@@ -565,6 +626,157 @@ export function importReceivables(
   return newReceivables;
 }
 
+// --- Presupuestos por categoría ---
+
+/**
+ * Define (o quita, con amountUsd <= 0) el presupuesto mensual de una
+ * categoría, en USDT.
+ */
+export function setBudget(category: Category, amountUsd: number): void {
+  const next = { ...$budgets.get() };
+  if (amountUsd > 0) {
+    next[category] = amountUsd;
+  } else {
+    delete next[category];
+  }
+  $budgets.set(next);
+}
+
+export interface BudgetImportItem {
+  category: Category;
+  amountUsd: number;
+}
+
+/**
+ * Aplica presupuestos importados desde Excel. En modo 'replace' el mapa
+ * queda exactamente como el archivo; en 'append' se fusiona y los items
+ * del archivo sobrescriben las categorías repetidas.
+ */
+export function importBudgets(
+  items: BudgetImportItem[],
+  mode: 'append' | 'replace' = 'append',
+): void {
+  const next =
+    mode === 'replace' ? {} : { ...$budgets.get() };
+  for (const item of items) {
+    if (item.amountUsd > 0) {
+      next[item.category] = item.amountUsd;
+    } else {
+      delete next[item.category];
+    }
+  }
+  $budgets.set(next);
+}
+
+export type BudgetStatus = 'none' | 'ok' | 'near' | 'over';
+
+export interface CategoryBudgetStatus {
+  category: Category;
+  /** Monto mensual asignado (USDT); 0 = sin presupuesto */
+  budgetUsd: number;
+  /** Consumido este mes: gastos del mes + cuentas por pagar pendientes (USDT) */
+  consumedUsd: number;
+  /** Lo que queda del presupuesto (negativo si hay excedente) */
+  remainingUsd: number;
+  /** Monto excedido sobre el presupuesto (0 si no hay) */
+  overUsd: number;
+  /** % del presupuesto consumido (0 si no hay presupuesto) */
+  pctUsed: number;
+  status: BudgetStatus;
+}
+
+/**
+ * Resumen de presupuestos por categoría para el mes en curso.
+ * El consumo incluye los gastos del mes y TODAS las cuentas por pagar
+ * pendientes (son un compromiso vigente aunque se hayan registrado antes).
+ */
+export const $budgetSummary = computed(
+  [$budgets, $expenses, $payables, $rates],
+  (budgets, expenses, payables, live): CategoryBudgetStatus[] => {
+    const consumedByCat = new Map<Category, number>();
+    const add = (cat: Category, usd: number) =>
+      consumedByCat.set(cat, (consumedByCat.get(cat) ?? 0) + usd);
+
+    for (const e of expenses) {
+      if (!inCurrentMonth(e.date)) continue;
+      add(e.category, contraValues(e, live).usdUsdt);
+    }
+    for (const p of payables) {
+      add(p.category, contraValues(p, live).usdUsdt);
+    }
+
+    return CATEGORIES.map((category) => {
+      const budgetUsd = budgets[category] ?? 0;
+      const consumedUsd = consumedByCat.get(category) ?? 0;
+      const pctUsed = budgetUsd > 0 ? (consumedUsd / budgetUsd) * 100 : 0;
+      const status: BudgetStatus =
+        budgetUsd <= 0
+          ? 'none'
+          : consumedUsd > budgetUsd
+            ? 'over'
+            : pctUsed >= 90
+              ? 'near'
+              : 'ok';
+      return {
+        category,
+        budgetUsd,
+        consumedUsd,
+        remainingUsd: budgetUsd - consumedUsd,
+        overUsd: Math.max(0, consumedUsd - budgetUsd),
+        pctUsed,
+        status,
+      };
+    });
+  },
+);
+
+export interface BudgetTotals {
+  /** Suma de los presupuestos mensuales definidos (USDT) */
+  budgetUsd: number;
+  /** Consumido total del mes, con y sin presupuesto asignado */
+  consumedUsd: number;
+  /** Consumido solo en categorías CON presupuesto */
+  budgetedConsumedUsd: number;
+  /** Consumido en categorías SIN presupuesto definido */
+  unbudgetedConsumedUsd: number;
+  /** Remanente del presupuesto asignado (negativo = excedido) */
+  remainingUsd: number;
+  /** Monto total excedido sobre los presupuestos */
+  overUsd: number;
+  /** Categorías con presupuesto / categorías excedidas */
+  definedCount: number;
+  overCount: number;
+}
+
+export const $budgetTotals = computed($budgetSummary, (summary): BudgetTotals => {
+  let budgetUsd = 0;
+  let consumedUsd = 0;
+  let budgetedConsumedUsd = 0;
+  let overUsd = 0;
+  let definedCount = 0;
+  let overCount = 0;
+  for (const s of summary) {
+    budgetUsd += s.budgetUsd;
+    consumedUsd += s.consumedUsd;
+    overUsd += s.overUsd;
+    if (s.budgetUsd > 0) {
+      definedCount += 1;
+      budgetedConsumedUsd += s.consumedUsd;
+      if (s.status === 'over') overCount += 1;
+    }
+  }
+  return {
+    budgetUsd,
+    consumedUsd,
+    budgetedConsumedUsd,
+    unbudgetedConsumedUsd: consumedUsd - budgetedConsumedUsd,
+    remainingUsd: budgetUsd - budgetedConsumedUsd,
+    overUsd,
+    definedCount,
+    overCount,
+  };
+});
+
 /** Cantidad total de registros guardados (ingresos, gastos, por pagar y por cobrar). */
 export function countAllRecords(): number {
   return (
@@ -576,14 +788,16 @@ export function countAllRecords(): number {
 }
 
 /**
- * Borra todos los listados (ingresos, gastos, por pagar y por cobrar).
- * No afecta las tasas guardadas ni la configuración. Acción irreversible.
+ * Borra todos los listados (ingresos, gastos, por pagar y por cobrar)
+ * y los presupuestos por categoría. No afecta las tasas guardadas ni la
+ * configuración. Acción irreversible.
  */
 export function clearAllData(): void {
   $expenses.set([]);
   $incomes.set([]);
   $payables.set([]);
   $receivables.set([]);
+  $budgets.set({});
   // No hay nada que exportar tras vaciar los listados.
   $hasUnexportedChanges.set(false);
 }
@@ -615,6 +829,7 @@ if (typeof window !== 'undefined') {
   $incomes.listen(markDirty);
   $payables.listen(markDirty);
   $receivables.listen(markDirty);
+  $budgets.listen(markDirty);
 }
 
 function todayLocal(): string {
@@ -786,14 +1001,20 @@ export interface SavingsBreakdown {
   incomeUsd: number;
   /** Total pendiente por cobrar (USDT) */
   receivableUsd: number;
+  /** Cantidad de cuentas por cobrar pendientes */
+  receivableCount: number;
   /** Total gastado (USDT) */
   expensesUsd: number;
   /** Total pendiente por pagar (USDT) */
   payablesUsd: number;
+  /** Cantidad de cuentas por pagar pendientes */
+  payablesCount: number;
   /** Ahorro actual: ingresos − gastos */
   netUsd: number;
   /** Saldo proyectado: net + por cobrar − por pagar */
   projectedUsd: number;
+  /** Remanente proyectado como % de los ingresos */
+  projectedPct: number;
   /** Tasa de ahorro: net / ingresos (%) */
   savingsRate: number;
 }
@@ -804,10 +1025,14 @@ export const $savings = computed($stats, (s): SavingsBreakdown => {
   return {
     incomeUsd: s.incomeUsd,
     receivableUsd: s.receivableUsd,
+    receivableCount: s.receivableCount,
     expensesUsd: s.totalUsd,
     payablesUsd: s.pendingUsd,
+    payablesCount: s.pendingCount,
     netUsd: net,
     projectedUsd: net + s.receivableUsd - s.pendingUsd,
+    projectedPct:
+      s.incomeUsd > 0 ? ((net + s.receivableUsd - s.pendingUsd) / s.incomeUsd) * 100 : 0,
     savingsRate: s.incomeUsd > 0 ? (net / s.incomeUsd) * 100 : 0,
   };
 });

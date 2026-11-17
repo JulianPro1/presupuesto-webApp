@@ -7,22 +7,28 @@ import {
   PiggyBank,
   CalendarClock,
   HandCoins,
+  Info,
 } from 'lucide-vue-next';
 import {
   $stats,
+  $savings,
+  $rates,
   $overduePayables,
   $byCategory,
 } from '../stores/budgetStore';
 import { formatUsd, formatVes, formatPct } from '../utils/formatters';
+import BasePopover from '@/components/common/feedback/BasePopover.vue';
 
 const stats = useStore($stats);
+const savings = useStore($savings);
+const rates = useStore($rates);
 const overdue = useStore($overduePayables);
 const byCategory = useStore($byCategory);
 
 const barWidth = computed(() =>
-  Math.min(Math.max(stats.value.pctFree, 0), 100),
+  Math.min(Math.max(savings.value.projectedPct, 0), 100),
 );
-const negative = computed(() => stats.value.remainingUsd < 0);
+const negative = computed(() => savings.value.projectedUsd < 0);
 const topCategory = computed(() => byCategory.value[0]?.category ?? null);
 
 const pl = (n: number, word: string) => (n === 1 ? word : `${word}s`);
@@ -68,7 +74,7 @@ const pl = (n: number, word: string) => (n === 1 ? word : `${word}s`);
     </a>
 
     <a
-      href="/saldo-a-favor"
+      href="/presupuestos"
       class="cursor-pointer rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-teal-200 hover:shadow"
     >
       <p
@@ -76,12 +82,43 @@ const pl = (n: number, word: string) => (n === 1 ? word : `${word}s`);
       >
         <PiggyBank class="h-3.5 w-3.5 text-teal-600" aria-hidden="true" />
         Remanente
+        <BasePopover
+          title="Desglose del remanente"
+          total-label="Remanente"
+          :total-value="formatUsd(savings.projectedUsd)"
+          :total-class="negative ? 'text-rose-600' : 'text-teal-600'"
+          :width="250"
+        >
+          <Info class="h-3 w-3 text-slate-400" aria-hidden="true" />
+          <template #rows>
+            <div class="flex items-center justify-between gap-4 text-[11.5px]">
+              <span class="text-slate-500">Ingresos</span>
+              <span class="font-semibold text-emerald-600">+ {{ formatUsd(savings.incomeUsd) }}</span>
+            </div>
+            <div class="flex items-center justify-between gap-4 text-[11.5px]">
+              <span class="text-slate-500">
+                Por cobrar<template v-if="savings.receivableCount"> ({{ savings.receivableCount }})</template>
+              </span>
+              <span class="font-semibold text-violet-600">+ {{ formatUsd(savings.receivableUsd) }}</span>
+            </div>
+            <div class="flex items-center justify-between gap-4 text-[11.5px]">
+              <span class="text-slate-500">Gastos</span>
+              <span class="font-semibold text-rose-600">− {{ formatUsd(savings.expensesUsd) }}</span>
+            </div>
+            <div class="flex items-center justify-between gap-4 text-[11.5px]">
+              <span class="text-slate-500">
+                Por pagar<template v-if="savings.payablesCount"> ({{ savings.payablesCount }})</template>
+              </span>
+              <span class="font-semibold text-amber-600">− {{ formatUsd(savings.payablesUsd) }}</span>
+            </div>
+          </template>
+        </BasePopover>
       </p>
       <p
         class="mt-1.5 text-lg font-bold"
         :class="negative ? 'text-rose-600' : 'text-teal-600'"
       >
-        {{ formatUsd(stats.remainingUsd) }}
+        {{ formatUsd(savings.projectedUsd) }}
       </p>
       <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
         <div
@@ -91,8 +128,8 @@ const pl = (n: number, word: string) => (n === 1 ? word : `${word}s`);
         />
       </div>
       <p class="mt-1 text-[10px] text-slate-500">
-        {{ formatPct(stats.pctFree) }} disponible ·
-        {{ formatVes(stats.remainingVesBcv) }} a BCV
+        {{ formatPct(savings.projectedPct) }} del ingreso ·
+        {{ formatVes(savings.projectedUsd * rates.bcv) }} a BCV
       </p>
     </a>
 

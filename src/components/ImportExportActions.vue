@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useStore } from '@nanostores/vue';
 import { FileSpreadsheet, Upload } from 'lucide-vue-next';
 import {
+  $budgets,
+  $budgetSummary,
   $expenses,
   $incomes,
   $payables,
@@ -14,6 +16,7 @@ import {
 import { exportBudgetToExcel } from '../utils/excelExport';
 import { useSwalToast } from '@/composables/ui/useSwalToast';
 import ImportDataModal from '@/components/ImportDataModal.vue';
+import ExportFileModal from '@/components/ExportFileModal.vue';
 
 const { showSuccess, showInfo } = useSwalToast();
 
@@ -23,19 +26,37 @@ const payables = useStore($payables);
 const receivables = useStore($receivables);
 const rates = useStore($rates);
 const totalIncome = useStore($totalIncome);
+const budgets = useStore($budgets);
+const budgetSummary = useStore($budgetSummary);
 
 const showImportModal = ref(false);
+const showExportModal = ref(false);
+const exportDefaultName = ref('');
 
-function handleExport() {
-  const total =
+const totalItems = computed(
+  () =>
     expenses.value.length +
     incomes.value.length +
     payables.value.length +
-    receivables.value.length;
-  if (total === 0) {
+    receivables.value.length +
+    Object.keys(budgets.value).length,
+);
+
+function monthStamp(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function handleExport() {
+  if (totalItems.value === 0) {
     showInfo('No hay registros para exportar');
     return;
   }
+  exportDefaultName.value = `presupuesto-${monthStamp()}`;
+  showExportModal.value = true;
+}
+
+function handleExportConfirm(fileName: string) {
   exportBudgetToExcel({
     expenses: expenses.value,
     incomes: incomes.value,
@@ -43,9 +64,12 @@ function handleExport() {
     receivables: receivables.value,
     rates: rates.value,
     incomeUsd: totalIncome.value.usd,
+    budgetSummary: budgetSummary.value,
+    fileName,
   });
   markChangesExported();
-  showSuccess(`Excel generado con ${total} registro(s)`);
+  showSuccess(`Excel generado con ${totalItems.value} registro(s)`);
+  showExportModal.value = false;
 }
 </script>
 
@@ -71,4 +95,11 @@ function handleExport() {
   </button>
 
   <ImportDataModal :open="showImportModal" @close="showImportModal = false" />
+  <ExportFileModal
+    :open="showExportModal"
+    :default-name="exportDefaultName"
+    scope-label="todo el presupuesto"
+    @close="showExportModal = false"
+    @confirm="handleExportConfirm"
+  />
 </template>

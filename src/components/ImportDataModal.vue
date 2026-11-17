@@ -19,6 +19,7 @@ import {
   type WorkbookValidationResult,
 } from '@/utils/excelImport';
 import {
+  importBudgets,
   importExpenses,
   importIncomes,
   importPayables,
@@ -46,6 +47,7 @@ const MODULE_LABELS: Record<SheetKind, string> = {
   expenses: 'Gastos',
   payables: 'Por pagar',
   receivables: 'Por cobrar',
+  budgets: 'Presupuestos',
 };
 
 const isScoped = computed(() => props.scope !== 'all');
@@ -71,7 +73,8 @@ const totalItems = computed(() => {
     r.expenses.length +
     r.incomes.length +
     r.payables.length +
-    r.receivables.length
+    r.receivables.length +
+    r.budgets.length
   );
 });
 
@@ -87,6 +90,14 @@ const previewItems = computed(() => {
       sheet: 'Por cobrar',
       group: c.source,
       ...c,
+    })),
+    ...r.budgets.map((b) => ({
+      sheet: 'Presupuestos',
+      date: '—',
+      description: 'Presupuesto mensual',
+      group: b.category,
+      amount: b.amountUsd,
+      currency: 'USDT',
     })),
   ];
   return all.slice(0, 5);
@@ -174,6 +185,7 @@ function handleConfirmImport() {
   if (!kind || kind === 'expenses') importExpenses(r.expenses, importMode.value);
   if (!kind || kind === 'payables') importPayables(r.payables, importMode.value);
   if (!kind || kind === 'receivables') importReceivables(r.receivables, importMode.value);
+  if (!kind || kind === 'budgets') importBudgets(r.budgets, importMode.value);
 
   showSuccess(
     importMode.value === 'replace'
@@ -206,7 +218,7 @@ function handleClose() {
             {{
               isScoped
                 ? `Solo se importarán registros de ${scopeLabel.toLowerCase()}`
-                : 'Ingresos, gastos, por pagar y por cobrar en un solo archivo'
+                : 'Ingresos, gastos, por pagar, por cobrar y presupuestos en un solo archivo'
             }}
           </p>
         </div>
@@ -224,7 +236,7 @@ function handleClose() {
               {{
                 isScoped
                   ? `Descarga la plantilla de ${scopeLabel.toLowerCase()} con ejemplos y opciones permitidas.`
-                  : 'Descarga la plantilla con las cuatro hojas (Ingresos, Gastos, Por pagar y Por cobrar), ejemplos y opciones permitidas.'
+                  : 'Descarga la plantilla con las cinco hojas (Ingresos, Gastos, Por pagar, Por cobrar y Presupuestos), ejemplos y opciones permitidas.'
               }}
             </p>
           </div>
@@ -380,8 +392,9 @@ function handleClose() {
               Se verificaron {{ totalItems }} registro(s) sin errores:
               {{ validationResult.incomes.length }} ingreso(s),
               {{ validationResult.expenses.length }} gasto(s),
-              {{ validationResult.payables.length }} por pagar y
-              {{ validationResult.receivables.length }} por cobrar.
+              {{ validationResult.payables.length }} por pagar,
+              {{ validationResult.receivables.length }} por cobrar y
+              {{ validationResult.budgets.length }} presupuesto(s).
             </p>
           </div>
         </div>
@@ -434,7 +447,7 @@ function handleClose() {
                   {{
                     isScoped
                       ? `Borra solo los registros actuales de ${scopeLabel.toLowerCase()}; los demás módulos no se modifican.`
-                      : 'Borra ingresos, gastos, por pagar y por cobrar actuales; carga solo los del archivo.'
+                      : 'Borra ingresos, gastos, por pagar, por cobrar y presupuestos actuales; carga solo los del archivo.'
                   }}
                 </span>
               </div>
@@ -469,6 +482,7 @@ function handleClose() {
                         'bg-sky-50 text-sky-700': item.sheet === 'Gastos',
                         'bg-amber-50 text-amber-700': item.sheet === 'Por pagar',
                         'bg-violet-50 text-violet-700': item.sheet === 'Por cobrar',
+                        'bg-blue-50 text-blue-700': item.sheet === 'Presupuestos',
                       }"
                     >
                       {{ item.sheet }}

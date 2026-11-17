@@ -4,13 +4,14 @@ import { useStore } from '@nanostores/vue';
 import {
   ChartPie,
   Utensils,
-  House,
   Zap,
   Car,
   HeartPulse,
   GraduationCap,
-  Clapperboard,
   PartyPopper,
+  Shirt,
+  Droplets,
+  PawPrint,
   Shapes,
 } from 'lucide-vue-next';
 import type { FunctionalComponent } from 'vue';
@@ -26,7 +27,6 @@ const CAT_META: Record<
     icon: Utensils,
     chip: 'bg-emerald-50 text-emerald-600 ring-emerald-100',
   },
-  Vivienda: { icon: House, chip: 'bg-sky-50 text-sky-600 ring-sky-100' },
   Servicios: { icon: Zap, chip: 'bg-amber-50 text-amber-600 ring-amber-100' },
   Transporte: {
     icon: Car,
@@ -40,9 +40,17 @@ const CAT_META: Record<
     icon: GraduationCap,
     chip: 'bg-indigo-50 text-indigo-600 ring-indigo-100',
   },
-  Entretenimiento: {
-    icon: Clapperboard,
-    chip: 'bg-fuchsia-50 text-fuchsia-600 ring-fuchsia-100',
+  'Ropa y calzado': {
+    icon: Shirt,
+    chip: 'bg-pink-50 text-pink-600 ring-pink-100',
+  },
+  'Higiene personal': {
+    icon: Droplets,
+    chip: 'bg-cyan-50 text-cyan-600 ring-cyan-100',
+  },
+  Mascotas: {
+    icon: PawPrint,
+    chip: 'bg-lime-50 text-lime-600 ring-lime-100',
   },
   Ocio: {
     icon: PartyPopper,

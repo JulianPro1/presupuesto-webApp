@@ -9,6 +9,8 @@ import {
   Trash2,
 } from 'lucide-vue-next';
 import {
+  $budgets,
+  $budgetSummary,
   $expenses,
   $incomes,
   $payables,
@@ -24,13 +26,16 @@ import {
 } from '@/stores/budgetStore';
 import {
   exportBudgetToExcel,
+  exportBudgetsToExcel,
   exportModuleToExcel,
   type ModuleKind,
 } from '@/utils/excelExport';
+import type { SheetKind } from '@/utils/excelImport';
 import { useSwal } from '@/composables/ui/useSwal';
 import { useSwalToast } from '@/composables/ui/useSwalToast';
 import Modal from '@/components/common/layout/Modal.vue';
 import ImportDataModal from '@/components/ImportDataModal.vue';
+import ExportFileModal from '@/components/ExportFileModal.vue';
 
 interface Props {
   open: boolean;
@@ -53,20 +58,46 @@ const rates = useStore($rates);
 const totalIncome = useStore($totalIncome);
 
 /** Import en curso: null = cerrado, 'all' = todo, SheetKind = módulo específico */
-const importScope = ref<'all' | ModuleKind | null>(null);
+const importScope = ref<'all' | SheetKind | null>(null);
+
+/** Exportación pendiente de confirmar nombre de archivo */
+const exportTarget = ref<'all' | SheetKind | null>(null);
+const exportDefaultName = ref('');
+const exportScopeLabel = ref('');
+
+const MODULE_SLUGS: Record<SheetKind, string> = {
+  incomes: 'ingresos',
+  expenses: 'gastos',
+  payables: 'por-pagar',
+  receivables: 'por-cobrar',
+  budgets: 'presupuestos',
+};
+
+function monthStamp(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+const budgets = useStore($budgets);
+const budgetSummary = useStore($budgetSummary);
+const budgetCount = computed(() => Object.keys(budgets.value).length);
 
 interface ModuleRow {
-  kind: ModuleKind;
+  kind: SheetKind;
   label: string;
   dot: string;
-  items: () => readonly (Expense | Income | Payable | Receivable)[];
+  /** Registros del módulo (solo módulos de movimientos) */
+  items?: () => readonly (Expense | Income | Payable | Receivable)[];
+  /** Cantidad a mostrar en la insignia del módulo */
+  count: () => number;
 }
 
 const modules: ModuleRow[] = [
-  { kind: 'incomes', label: 'Ingresos', dot: 'bg-emerald-500', items: () => incomes.value },
-  { kind: 'expenses', label: 'Gastos', dot: 'bg-rose-500', items: () => expenses.value },
-  { kind: 'payables', label: 'Por pagar', dot: 'bg-amber-500', items: () => payables.value },
-  { kind: 'receivables', label: 'Por cobrar', dot: 'bg-violet-500', items: () => receivables.value },
+  { kind: 'incomes', label: 'Ingresos', dot: 'bg-emerald-500', items: () => incomes.value, count: () => incomes.value.length },
+  { kind: 'expenses', label: 'Gastos', dot: 'bg-rose-500', items: () => expenses.value, count: () => expenses.value.length },
+  { kind: 'payables', label: 'Por pagar', dot: 'bg-amber-500', items: () => payables.value, count: () => payables.value.length },
+  { kind: 'receivables', label: 'Por cobrar', dot: 'bg-violet-500', items: () => receivables.value, count: () => receivables.value.length },
+  { kind: 'budgets', label: 'Presupuestos', dot: 'bg-blue-500', count: () => budgetCount.value },
 ];
 
 const totalRecords = computed(
@@ -77,31 +108,79 @@ const totalRecords = computed(
     receivables.value.length,
 );
 
+const totalExportable = computed(() => totalRecords.value + budgetCount.value);
+
 function handleExportAll() {
-  if (totalRecords.value === 0) {
+  if (totalExportable.value === 0) {
     showInfo('No hay registros para exportar');
     return;
   }
-  exportBudgetToExcel({
-    expenses: expenses.value,
-    incomes: incomes.value,
-    payables: payables.value,
-    receivables: receivables.value,
-    rates: rates.value,
-    incomeUsd: totalIncome.value.usd,
-  });
-  markChangesExported();
-  showSuccess(`Excel generado con ${totalRecords.value} registro(s)`);
+  exportTarget.value = 'all';
+  exportDefaultName.value = `presupuesto-${monthStamp()}`;
+  exportScopeLabel.value = 'todo el presupuesto';
 }
 
 function handleExportModule(mod: ModuleRow) {
-  const items = mod.items();
-  if (items.length === 0) {
+  if (mod.kind === 'budgets') {
+    if (budgetCount.value === 0) {
+      showInfo('No hay presupuestos para exportar');
+      return;
+    }
+  } else if ((mod.items?.() ?? []).length === 0) {
     showInfo(`No hay registros de ${mod.label.toLowerCase()} para exportar`);
     return;
   }
-  exportModuleToExcel(mod.kind, items, rates.value, totalIncome.value.usd);
-  showSuccess(`Excel de ${mod.label.toLowerCase()} generado con ${items.length} registro(s)`);
+  exportTarget.value = mod.kind;
+  exportDefaultName.value = `presupuesto-${MODULE_SLUGS[mod.kind]}-${monthStamp()}`;
+  exportScopeLabel.value = mod.label.toLowerCase();
+}
+
+const showExportModal = computed(() => exportTarget.value !== null);
+
+function closeExportModal() {
+  exportTarget.value = null;
+}
+
+function handleExportConfirm(fileName: string) {
+  const target = exportTarget.value;
+  if (!target) return;
+
+  if (target === 'all') {
+    exportBudgetToExcel({
+      expenses: expenses.value,
+      incomes: incomes.value,
+      payables: payables.value,
+      receivables: receivables.value,
+      rates: rates.value,
+      incomeUsd: totalIncome.value.usd,
+      budgetSummary: budgetSummary.value,
+      fileName,
+    });
+    markChangesExported();
+    showSuccess(
+      `Excel generado con ${totalRecords.value} registro(s) y ${budgetCount.value} presupuesto(s)`,
+    );
+  } else if (target === 'budgets') {
+    exportBudgetsToExcel(budgetSummary.value, new Date(), fileName);
+    showSuccess(`Excel de presupuestos generado con ${budgetCount.value} categoría(s)`);
+  } else {
+    const mod = modules.find((m) => m.kind === target);
+    const items = mod?.items?.() ?? [];
+    // target es un ModuleKind para los módulos de movimientos
+    exportModuleToExcel(
+      target as ModuleKind,
+      items,
+      rates.value,
+      totalIncome.value.usd,
+      new Date(),
+      fileName,
+    );
+    showSuccess(
+      `Excel de ${mod?.label.toLowerCase()} generado con ${items.length} registro(s)`,
+    );
+  }
+
+  exportTarget.value = null;
 }
 
 function openImportAll() {
@@ -205,7 +284,7 @@ async function handleClearAll() {
               <span class="h-2 w-2 shrink-0 rounded-full" :class="mod.dot" aria-hidden="true" />
               <span class="truncate text-sm font-semibold text-slate-800">{{ mod.label }}</span>
               <span class="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
-                {{ mod.items().length }}
+                {{ mod.count() }}
               </span>
             </div>
             <div class="flex shrink-0 items-center gap-1.5">
@@ -237,5 +316,13 @@ async function handleClearAll() {
     :scope="importScope ?? 'all'"
     @close="closeImportModal"
     @success="closeImportModal"
+  />
+
+  <ExportFileModal
+    :open="showExportModal"
+    :default-name="exportDefaultName"
+    :scope-label="exportScopeLabel"
+    @close="closeExportModal"
+    @confirm="handleExportConfirm"
   />
 </template>
