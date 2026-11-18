@@ -58,9 +58,10 @@ const totals = computed(() =>
       acc.usdBcv += c.usdBcv;
       acc.vesBcv += c.vesBcv;
       acc.vesUsdt += c.vesUsdt;
+      acc.gapVes += c.gapVes;
       return acc;
     },
-    { usdUsdt: 0, usdBcv: 0, vesBcv: 0, vesUsdt: 0 },
+    { usdUsdt: 0, usdBcv: 0, vesBcv: 0, vesUsdt: 0, gapVes: 0 },
   ),
 );
 
@@ -104,7 +105,10 @@ const headers: TableHeader[] = [
   { key: 'description', label: 'Descripción' },
   { key: 'category', label: 'Categoría' },
   { key: 'usdUsdt', label: '$ USDT' },
+  { key: 'usdBcv', label: '$ BCV' },
   { key: 'vesBcv', label: 'Bs. BCV' },
+  { key: 'vesUsdt', label: 'Bs. USDT' },
+  { key: 'gapVes', label: 'Brecha' },
   { key: 'dueDate', label: 'Vencimiento' },
   { key: 'status', label: 'Estado' },
 ];
@@ -210,7 +214,7 @@ async function handleActionClick(payload: {
     >
       <span>Pendiente {{ formatUsd(totals.usdUsdt) }}</span>
       <span class="text-sky-700">≈ {{ formatUsd(totals.usdBcv) }} a tasa BCV</span>
-      <span class="text-amber-600">{{ formatVes(totals.vesUsdt) }} a tasa USDT</span>
+      <span class="text-amber-600">Brecha {{ formatVes(totals.gapVes) }}</span>
     </p>
 
     <CustomTable
@@ -254,8 +258,22 @@ async function handleActionClick(payload: {
         </span>
       </template>
 
+      <template #cell(usdBcv)="{ value }">
+        <span class="font-medium whitespace-nowrap text-sky-700">
+          {{ formatUsd(value) }}
+        </span>
+      </template>
+
       <template #cell(vesBcv)="{ value }">
         <span class="whitespace-nowrap text-slate-600">{{ formatVes(value) }}</span>
+      </template>
+
+      <template #cell(vesUsdt)="{ value }">
+        <span class="whitespace-nowrap text-slate-600">{{ formatVes(value) }}</span>
+      </template>
+
+      <template #cell(gapVes)="{ value }">
+        <span class="whitespace-nowrap text-amber-600">{{ formatVes(value) }}</span>
       </template>
 
       <template #cell(dueDate)="{ value }">
